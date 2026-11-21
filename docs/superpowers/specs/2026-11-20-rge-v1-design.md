@@ -1,7 +1,7 @@
 # RGE v1 Design: Recruiter Growth Engine
 
 Date: 2026-11-20
-Status: Draft for approval
+Status: Approved by the founder, 2026-11-21
 Source: design interview with the founder (2026-11-20), the MPC sales process handoff and Prospector's research process spec (both in `private/`, not committed).
 
 ## 1. Intent
@@ -61,7 +61,7 @@ The founder handed over the how ("start building"). A was chosen because it is t
 
 ## 5. The daily loop
 
-1. **Overnight, before the send window:** sync jobs refresh the contact ledger from connected Gmail inboxes, refresh the marketplace do-not-contact list, and refresh ATS data.
+1. **Overnight, before the send window:** sync jobs refresh the contact ledger from connected Gmail inboxes and refresh ATS data.
 2. **Research run** (default 5:00 AM in the agency's time zone, on send days): for each active MPC, find prospects up to the day's allocation (section 7), run checks, find the decision maker, verify the email, score and sort.
 3. **Drafting:** draft a pitch for each qualified prospect from the agency template, then run the draft guard (section 8).
 4. **Approval feed** is ready when the recruiter wakes up. A push notification says how many are waiting.
@@ -105,7 +105,7 @@ Rebuilt from Prospector's actual practice, with its failures fixed.
 - **Firm universe:** a saved, growing list of companies per specialty and region, with every company considered, pitched or rejected and the reason. Rejected companies are not re-researched unless something changes.
 
 ### Order of work (cheapest first; nothing paid until free checks pass)
-1. Company-level exclusions: do-not-contact list (marketplace clients, including parent and subsidiary aliases), recruiting-industry companies, MPC excluded companies, already handed off for this MPC.
+1. Company-level exclusions: do-not-contact list (for example marketplace clients; entries match the company's domains and any parent or subsidiary names entered as aliases), recruiting-industry companies, MPC excluded companies, already handed off for this MPC.
 2. Repeat check against the contact ledger: by company domain and by contact, within the agency's repeat window.
 3. Decline check: any decline from that company in the ledger.
 4. MPC hard filters: location, licensing, employer-type preference, overqualification limit, strict pay floor.
@@ -283,7 +283,7 @@ Reference mockups: `private/mockups/approvals-mobile-v2.png` (phone), `approvals
 - Agency: name, time zone, send days and window, repeat window (2 weeks, 30, 60, 90 days, custom; WR default 60), stale posting age (90 days), large-firm list, do-not-contact companies, recruiting-industry exclusion on or off, decision-maker priority, average fee, stage chances, approval mode.
 - Templates: pitch, follow-up 1, breakup, opt-out line.
 - Inboxes: connect, signature, daily cap (calculated, shown), warm-up status, open tracking.
-- Integrations: data provider (Apollo first, ZoomInfo next), ATS (Loxo first, then Bullhorn and others), Google Calendar, marketplace sync (WR: Paraform).
+- Integrations: data provider (Apollo first, ZoomInfo next), ATS (Loxo first, then Bullhorn and others), Google Calendar.
 - Team: users, roles.
 
 ## 17. Integrations
@@ -292,7 +292,7 @@ Reference mockups: `private/mockups/approvals-mobile-v2.png` (phone), `approvals
 - **Google Calendar:** free/busy for proposing call times.
 - **Contact data:** agency's own Apollo key first (people search, people match for work email only, never personal email, no waterfall, no phone, no Apollo sequences). ZoomInfo next. Built-in data later.
 - **ATS:** Loxo first. Import candidates as MPCs; export signed clients (company and contacts). Bullhorn and others after.
-- **Marketplace do-not-contact sync:** WR's Paraform board pulled daily across all role types; every company ever seen stays blocked; names, domains and parent or subsidiary aliases normalized; matched by domain. If server-side Paraform access is not available, WR uses a daily CSV or manual update instead, and research pauses with a "do-not-contact list is out of date" notice when the list is more than 3 days old. Other agencies maintain the list by hand or CSV.
+- **No marketplace integrations** (Paraform or similar). The do-not-contact company list is maintained by hand or by CSV upload in settings; each entry holds the company name, domains and any parent or subsidiary aliases, and companies stay blocked until removed.
 - **Web search and AI:** Claude models for research reasoning, fit writing, drafting, the guard's language checks, reply classification and Ask RGE; a web search tool for openings, company research and Find more.
 
 ## 18. Data model (summary)
@@ -307,7 +307,7 @@ Reference mockups: `private/mockups/approvals-mobile-v2.png` (phone), `approvals
 
 ## 19. Migration of WR's existing data (before the first send)
 
-Import from `private/`: the MPC roster (21 active, removals and holds as statuses, restrictions as structured fields), both suppression files merged, every send log and sales outcome, Paraform-blocked companies, and the founder's Gmail sent and inbound mail back to the start of MPC outreach (October 2026) or the longest repeat window, whichever is earlier, plus every inbox the bots or recruiters used for MPC outreach. Opt-outs, bounces and declines are imported regardless of age and stay permanent. Repeat and opt-out checks must know everyone the bots already emailed before RGE sends anything.
+Import from `private/`: the MPC roster (21 active, removals and holds as statuses, restrictions as structured fields), both suppression files merged, every send log and sales outcome, the companies WR already blocks as marketplace clients (into the do-not-contact list), and the founder's Gmail sent and inbound mail back to the start of MPC outreach (October 2026) or the longest repeat window, whichever is earlier, plus every inbox the bots or recruiters used for MPC outreach. Opt-outs, bounces and declines are imported regardless of age and stay permanent. Repeat and opt-out checks must know everyone the bots already emailed before RGE sends anything.
 
 ## 20. Look and feel
 
@@ -368,7 +368,7 @@ Import from `private/`: the MPC roster (21 active, removals and holds as statuse
 13. Approved replies send immediately at any hour; the send window applies to pitches and follow-ups.
 14. Agency postal address required on every pitch and follow-up (CAN-SPAM).
 15. Running-cost target of about $50 per recruiter per month, ceiling $100, read from "$100 to $200 per person would be fair" as the subscription price range.
-16. Paraform CSV fallback, with research pausing when the do-not-contact list is more than 3 days old.
+16. Do-not-contact companies are a manual or CSV list (no marketplace integration, per founder).
 
 ## 26. Left to the builder
 
