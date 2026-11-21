@@ -56,7 +56,8 @@ export function runAsMember<T>(member: Member, fn: () => Promise<T>): Promise<T>
 /**
  * The signed-in member of the active agency. Redirects to /sign-in when signed out and to
  * /no-agency when there is no active organization or it does not map to an active, synced
- * membership (a removed member counts as none).
+ * membership (a removed member counts as none), or when the agency is not enabled yet (no
+ * self-serve tenants: the founder enables each agency by hand, see README).
  *
  * The lookup runs as rge_system because no agency context exists yet; it only reads
  * agencies, users and memberships. Callers then use withAgency(member.agencyId, ...).
@@ -70,16 +71,30 @@ export async function requireMember(): Promise<Member> {
   if (!userId) redirect("/sign-in");
   if (!orgId) redirect("/no-agency");
 
+  const row = await activeMembership(userId, orgId);
+  // Not a member, removed, the Clerk webhook has not synced the membership yet, or the agency is
+  // still waiting for approval.
+  if (!row || !row.enabled) redirect("/no-agency");
+  return { userId: row.userId, agencyId: row.agencyId, role: row.role };
+}
+
+async function activeMembership(clerkUserId: string, clerkOrgId: string) {
   const [row] = await withSystem((tx) =>
     tx
-      .select({ userId: users.id, agencyId: agencies.id, role: memberships.role })
+      .select({ userId: users.id, agencyId: agencies.id, role: memberships.role, enabled: agencies.enabled })
       .from(memberships)
       .innerJoin(users, eq(users.id, memberships.userId))
       .innerJoin(agencies, eq(agencies.id, memberships.agencyId))
-      .where(and(eq(users.clerkUserId, userId), eq(agencies.clerkOrgId, orgId), eq(memberships.status, "active")))
+      .where(and(eq(users.clerkUserId, clerkUserId), eq(agencies.clerkOrgId, clerkOrgId), eq(memberships.status, "active")))
       .limit(1),
   );
-  // Not a member, removed, or the Clerk webhook has not synced the membership yet.
-  if (!row) redirect("/no-agency");
   return row;
+}
+
+/** True when the signed-in user is an active member of their active agency but it is not enabled yet. */
+export async function agencyAwaitingApproval(): Promise<boolean> {
+  const { userId, orgId } = await (authReaderOverride ?? clerkAuthReader)();
+  if (!userId || !orgId) return false;
+  const row = await activeMembership(userId, orgId);
+  return Boolean(row && !row.enabled);
 }

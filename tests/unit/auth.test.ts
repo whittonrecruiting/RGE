@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { agencies, memberships, users } from "@/db/schema";
-import { mapClerkRole, requireMember, setAuthReader } from "@/lib/auth";
+import { agencyAwaitingApproval, mapClerkRole, requireMember, setAuthReader } from "@/lib/auth";
 import { asOwner, createTestDb, seedAgencies } from "../helpers/test-db";
 import { asMember, seedMembers } from "../helpers/as-member";
 
@@ -97,6 +97,37 @@ describe("requireMember", () => {
     await setup(1);
     await expect(requireMember()).rejects.toThrow(/Clerk is not configured/);
     vi.unstubAllEnvs();
+  });
+});
+
+describe("tenant gate (agencies.enabled)", () => {
+  test("a member of a disabled agency is redirected to /no-agency and shown as awaiting approval", async () => {
+    const { db, agencies: [a] } = await setup(1);
+    await asOwner(db, (tx) => tx.update(agencies).set({ enabled: false }).where(eq(agencies.id, a.id)));
+    const ids = await clerkIds(db, [a.id], [a.ownerId]);
+    setAuthReader(async () => ({ userId: ids.users[a.ownerId], orgId: ids.orgs[a.id] }));
+    expect(await redirectOf(requireMember())).toBe("/no-agency");
+    expect(await agencyAwaitingApproval()).toBe(true);
+  });
+
+  test("a member of an enabled agency gets the Member and is not awaiting approval", async () => {
+    const { db, agencies: [a] } = await setup(1);
+    const ids = await clerkIds(db, [a.id], [a.ownerId]);
+    setAuthReader(async () => ({ userId: ids.users[a.ownerId], orgId: ids.orgs[a.id] }));
+    expect(await requireMember()).toEqual({ userId: a.ownerId, agencyId: a.id, role: "owner" });
+    expect(await agencyAwaitingApproval()).toBe(false);
+  });
+
+  test("awaiting approval is false when signed out, without an org, or not a member", async () => {
+    const { db, agencies: [a, b] } = await setup(2);
+    await asOwner(db, (tx) => tx.update(agencies).set({ enabled: false }));
+    const ids = await clerkIds(db, [a.id, b.id], [a.ownerId]);
+    setAuthReader(async () => ({ userId: null, orgId: null }));
+    expect(await agencyAwaitingApproval()).toBe(false);
+    setAuthReader(async () => ({ userId: ids.users[a.ownerId], orgId: null }));
+    expect(await agencyAwaitingApproval()).toBe(false);
+    setAuthReader(async () => ({ userId: ids.users[a.ownerId], orgId: ids.orgs[b.id] }));
+    expect(await agencyAwaitingApproval()).toBe(false);
   });
 });
 
