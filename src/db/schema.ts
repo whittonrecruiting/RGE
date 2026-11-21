@@ -2,6 +2,7 @@ import {
   boolean,
   date,
   foreignKey,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -51,12 +52,20 @@ export const restrictionKind = pgEnum("restriction_kind", [
 ]);
 export const consentMethod = pgEnum("consent_method", ["verbal", "email", "signed_form"]);
 export const documentKind = pgEnum("document_kind", ["resume", "notes", "transcript"]);
+export const aiPurpose = pgEnum("ai_purpose", ["extraction", "find_more"]);
+
+// The updated_at of the last Clerk event applied to a row. Older (out of order) events are skipped.
+const clerkUpdatedAt = () => timestamp("clerk_updated_at", { withTimezone: true });
 
 export const agencies = pgTable("agencies", {
   id: id(),
   clerkOrgId: text("clerk_org_id").notNull().unique(),
   name: text("name").notNull(),
   timeZone: text("time_zone").notNull().default("America/Phoenix"),
+  // No self-serve tenants: a new agency stays disabled until the founder enables it by hand.
+  // Neither rge_app nor rge_system may change it (column-limited grants in src/db/rls.sql).
+  enabled: boolean("enabled").notNull().default(false),
+  clerkUpdatedAt: clerkUpdatedAt(),
   ...timestamps,
 });
 
@@ -66,6 +75,7 @@ export const users = pgTable("users", {
   clerkUserId: text("clerk_user_id").notNull().unique(),
   email: text("email").notNull(),
   name: text("name").notNull(),
+  clerkUpdatedAt: clerkUpdatedAt(),
   ...timestamps,
 });
 
@@ -80,6 +90,7 @@ export const memberships = pgTable(
     role: membershipRole("role").notNull(),
     // Removal is soft: the row stays so MPCs, consents and facts keep their member references.
     status: membershipStatus("status").notNull().default("active"),
+    clerkUpdatedAt: clerkUpdatedAt(),
     ...timestamps,
   },
   (t) => [unique("memberships_agency_user_unique").on(t.agencyId, t.userId)],
@@ -140,11 +151,23 @@ export const mpcFacts = pgTable(
     status: factStatus("status").notNull().default("usable"),
     confirmedBy: uuid("confirmed_by"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    // The stored document an extracted fact came from. source_ref keeps the display name.
+    sourceDocumentId: uuid("source_document_id"),
+    // Who last changed the wording by hand, and when.
+    editedBy: uuid("edited_by"),
+    editedAt: timestamp("edited_at", { withTimezone: true }),
     ...timestamps,
   },
   (t) => [
     sameAgencyMpc(t, "mpc_facts_mpc_fk"),
     sameAgencyMember(t, t.confirmedBy, "mpc_facts_confirmed_by_member_fk"),
+    sameAgencyMember(t, t.editedBy, "mpc_facts_edited_by_member_fk"),
+    // The migration narrows this to ON DELETE SET NULL (source_document_id): agency_id stays.
+    foreignKey({
+      name: "mpc_facts_source_document_fk",
+      columns: [t.agencyId, t.sourceDocumentId],
+      foreignColumns: [mpcDocuments.agencyId, mpcDocuments.id],
+    }).onDelete("set null"),
   ],
 );
 
@@ -193,6 +216,7 @@ export const mpcDocuments = pgTable(
     ...timestamps,
   },
   (t) => [
+    unique("mpc_documents_agency_id_unique").on(t.agencyId, t.id),
     sameAgencyMpc(t, "mpc_documents_mpc_fk"),
     sameAgencyMember(t, t.createdBy, "mpc_documents_created_by_member_fk"),
   ],
@@ -205,3 +229,24 @@ export const agencySettings = pgTable("agency_settings", {
   values: jsonb("values").notNull().default({}),
   ...timestamps,
 });
+
+// One row per paid AI call (success or failure), for metering and rate limits.
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    userId: uuid("user_id").notNull(),
+    purpose: aiPurpose("purpose").notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    webSearches: integer("web_searches").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    sameAgencyMember(t, t.userId, "ai_usage_user_member_fk"),
+    index("ai_usage_agency_created_idx").on(t.agencyId, t.createdAt),
+    index("ai_usage_agency_user_created_idx").on(t.agencyId, t.userId, t.createdAt),
+  ],
+);

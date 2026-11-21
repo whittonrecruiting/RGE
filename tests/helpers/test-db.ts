@@ -55,7 +55,7 @@ export async function seedAgencies(db: TestDb, n: number): Promise<SeededAgency[
       const tag = randomUUID().slice(0, 8);
       const [agency] = await tx
         .insert(schema.agencies)
-        .values({ clerkOrgId: `org_test_${tag}`, name: `Test Agency ${i + 1}` })
+        .values({ clerkOrgId: `org_test_${tag}`, name: `Test Agency ${i + 1}`, enabled: true })
         .returning();
       const roles = ["owner", "admin", "recruiter", "recruiter"] as const;
       const ids: string[] = [];

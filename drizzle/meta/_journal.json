@@ -50,6 +50,27 @@
       "when": 1795296459070,
       "tag": "0006_rls_membership_removal",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795300510717,
+      "tag": "0007_plan1_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795300532027,
+      "tag": "0008_rls_plan1_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795300534496,
+      "tag": "0009_session_role_grants",
+      "breakpoints": true
     }
   ]
 }
