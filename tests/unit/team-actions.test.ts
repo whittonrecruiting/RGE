@@ -105,6 +105,20 @@ describe("inviteMember", () => {
     expect(clerk.inviteToOrganization).toHaveBeenNthCalledWith(2, expect.objectContaining({ role: "recruiter" }));
   });
 
+  test("a Clerk failure is logged as status and code only, never the error object or the email", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const clerkError = Object.assign(new Error("Invitation for new@example.test failed"), {
+      status: 422,
+      clerkTraceId: "trace_1",
+      errors: [{ code: "duplicate_record", message: "new@example.test is already invited", meta: { emailAddress: "new@example.test" } }],
+    });
+    clerk.inviteToOrganization.mockRejectedValueOnce(clerkError);
+    expect((await inviteMemberAs(f.owner, "new@example.test", "recruiter")).ok).toBe(false);
+    expect(log).toHaveBeenCalledWith("inviteMember: Clerk call failed", { status: 422, code: "duplicate_record" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("example.test");
+    expect(log.mock.calls.flat()).not.toContain(clerkError);
+  });
+
   test("a Clerk failure becomes an inline error", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     clerk.inviteToOrganization.mockRejectedValueOnce(new Error("boom"));

@@ -20,6 +20,17 @@ const REMOVE_LOCAL_FAILED = "The member was removed from sign-in but RGE could n
 
 const fail = (error: string): TeamResult => ({ ok: false, error });
 
+/**
+ * What may be logged about a failure: the HTTP status and error code only. Clerk errors (and their
+ * messages and meta) can carry invited email addresses, so the error object is never logged.
+ */
+function errorSummary(err: unknown): { status: number | null; code: string | null } {
+  const e = (err ?? {}) as { status?: unknown; code?: unknown; errors?: { code?: unknown }[]; cause?: { code?: unknown } };
+  const status = typeof e.status === "number" ? e.status : null;
+  const code = [e.errors?.[0]?.code, e.code, e.cause?.code].find((c): c is string => typeof c === "string") ?? null;
+  return { status, code };
+}
+
 /** Roles an action may assign. There is exactly one Owner, so owner is never assignable here. */
 const isAssignable = (role: unknown): role is Exclude<Role, "owner"> => role === "admin" || role === "recruiter";
 
@@ -64,7 +75,7 @@ export async function inviteMember(email: string, role: Role): Promise<TeamResul
   try {
     await getTeamClerk().inviteToOrganization({ orgId: await agencyClerkOrgId(member), email: address, role });
   } catch (err) {
-    console.error("inviteMember: Clerk call failed", err);
+    console.error("inviteMember: Clerk call failed", errorSummary(err));
     return fail(CLERK_FAILED);
   }
   revalidatePath("/team");
@@ -87,7 +98,7 @@ export async function setMemberRole(membershipId: string, role: Role): Promise<T
       role,
     });
   } catch (err) {
-    console.error("setMemberRole: Clerk call failed", err);
+    console.error("setMemberRole: Clerk call failed", errorSummary(err));
     return fail(CLERK_FAILED);
   }
   // Mirror Clerk now so the page is immediately right; the webhook would sync the same value.
@@ -97,7 +108,7 @@ export async function setMemberRole(membershipId: string, role: Role): Promise<T
     );
   } catch (err) {
     // The organizationMembership.updated webhook will also reconcile our copy.
-    console.error("setMemberRole: local update failed after Clerk succeeded", err);
+    console.error("setMemberRole: local update failed after Clerk succeeded", errorSummary(err));
     return fail(LOCAL_FAILED);
   }
   revalidatePath("/team");
@@ -131,7 +142,7 @@ export async function removeMember(membershipId: string): Promise<TeamResult> {
   } catch (err) {
     // Already gone in Clerk (an earlier attempt, or the webhook): carry on so the local step completes.
     if (!(err instanceof ClerkNotFoundError)) {
-      console.error("removeMember: Clerk call failed", err);
+      console.error("removeMember: Clerk call failed", errorSummary(err));
       return fail(CLERK_FAILED);
     }
   }
@@ -148,7 +159,7 @@ export async function removeMember(membershipId: string): Promise<TeamResult> {
     });
   } catch (err) {
     // The transaction rolled back as a whole; a retry finishes it (Clerk not-found counts as success).
-    console.error("removeMember: local step failed after Clerk succeeded", err);
+    console.error("removeMember: local step failed after Clerk succeeded", errorSummary(err));
     return fail(REMOVE_LOCAL_FAILED);
   }
   revalidatePath("/team");
