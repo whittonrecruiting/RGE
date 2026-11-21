@@ -44,15 +44,23 @@ describe("extractProfile", () => {
 
   test("a quote must be in its own source, and an unknown source ref is dropped", () => {
     const sources = [
-      { kind: "resume" as const, text: "Alpha text here.", ref: "a.pdf" },
-      { kind: "notes" as const, text: "Beta text here.", ref: "b.txt" },
+      { kind: "resume" as const, text: "Alpha text here for testing.", ref: "a.pdf" },
+      { kind: "notes" as const, text: "Beta text here for testing.", ref: "b.txt" },
     ];
     const facts = [
-      { text: "wrong source", sourceKind: "resume" as const, sourceRef: "a.pdf", sourceQuote: "Beta text here." },
-      { text: "unknown", sourceKind: "resume" as const, sourceRef: "zzz.pdf", sourceQuote: "Alpha text here." },
-      { text: "ok", sourceKind: "notes" as const, sourceRef: "b.txt", sourceQuote: "Beta text here." },
+      { text: "wrong source", sourceKind: "resume" as const, sourceRef: "a.pdf", sourceQuote: "Beta text here for testing." },
+      { text: "unknown", sourceKind: "resume" as const, sourceRef: "zzz.pdf", sourceQuote: "Alpha text here for testing." },
+      { text: "ok", sourceKind: "notes" as const, sourceRef: "b.txt", sourceQuote: "Beta text here for testing." },
     ];
     expect(verifyFacts(facts, sources).map((f) => f.text)).toEqual(["ok"]);
+  });
+
+  test("a quote under 20 characters after normalization is dropped", () => {
+    const sources = [{ kind: "resume" as const, text: "Led discovery on a $120M matter.", ref: "r.pdf" }];
+    const short = { text: "x", sourceKind: "resume" as const, sourceRef: "r.pdf", sourceQuote: "Led  discovery" };
+    const exact = { text: "y", sourceKind: "resume" as const, sourceRef: "r.pdf", sourceQuote: "Led discovery on a $1" };
+    expect(verifyFacts([short], sources)).toEqual([]);
+    expect(verifyFacts([exact], sources).map((f) => f.text)).toEqual(["y"]);
   });
 
   test("source kind comes from the provided source, not the model claim", async () => {

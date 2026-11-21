@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { mpcDocuments, mpcFacts, mpcRestrictions, mpcs } from "@/db/schema";
+import { mpcDocuments, mpcRestrictions, mpcs } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { createMpc } from "@/lib/mpc/actions";
 import { addDocument, applyExtraction, runExtraction } from "@/lib/mpc/document-actions";
 import { listDocuments, listFacts } from "@/lib/mpc/document-queries";
 import { getMpc } from "@/lib/mpc/queries";
+import { signDraft } from "@/lib/mpc/draft-signing";
+import type { ProfileDraft } from "@/lib/ai/extract-profile";
 import { setTestFileStore } from "@/lib/storage";
 import { setTestGenerate } from "@/lib/ai/models";
 import type { Member } from "@/lib/auth";
@@ -26,12 +28,14 @@ beforeEach(async () => {
   close = t.close;
   f = await seedMembers(db);
   stored.length = 0;
+  process.env.RGE_DRAFT_SECRET = "test-secret-for-draft-signing";
   setTestFileStore(async (name, bytes, contentType) => {
     stored.push({ name, type: contentType, size: bytes.length });
     return { url: `https://blob.test/${stored.length}/${name}` };
   });
 });
 afterEach(async () => {
+  delete process.env.RGE_DRAFT_SECRET;
   setTestFileStore(undefined);
   setTestGenerate(undefined);
   await close?.();
@@ -175,24 +179,28 @@ describe("runExtraction", () => {
 });
 
 describe("applyExtraction", () => {
-  async function draftFor(id: string) {
+  type Signed = { draft: ProfileDraft; issuedAt: number; signature: string };
+  async function draftFor(id: string, m: Member = f.recA): Promise<Signed> {
     setTestGenerate(fakeGenerate(draftOut));
-    const r = await asMember(f.recA, () => runExtraction(id));
+    const r = await asMember(m, () => runExtraction(id));
     if (!r.ok) throw new Error(r.error);
-    return r.draft;
+    return { draft: r.draft, issuedAt: r.issuedAt, signature: r.signature };
   }
+  const accept = (s: Signed, over: Partial<Parameters<typeof applyExtraction>[1]> = {}) => ({
+    ...s,
+    fields: {},
+    factIndexes: [] as number[],
+    restrictionIndexes: [] as number[],
+    ...over,
+  });
+  const STALE = { ok: false, error: "This review is out of date. Run the extraction again." };
 
   test("writes only accepted fields, facts and restrictions, with status by source kind", async () => {
     const id = await newMpc(f.recA);
     await seedDocs(id);
-    const draft = await draftFor(id);
+    const s = await draftFor(id);
     const r = await asMember(f.recA, () =>
-      applyExtraction(id, {
-        draft,
-        fields: { yearsExperience: 9 },
-        factIndexes: [0, 1],
-        restrictionIndexes: [],
-      }),
+      applyExtraction(id, accept(s, { fields: { yearsExperience: 9 }, factIndexes: [0, 1] })),
     );
     expect(r).toEqual({ ok: true });
     const mpc = await asMember(f.recA, () => getMpc(f.recA, id));
@@ -204,83 +212,148 @@ describe("applyExtraction", () => {
       ["Led discovery on a large matter", "usable", "resume"],
       ["Open to Denver", "interview_only", "notes"],
     ]);
-    const restrictions = await withAgency(f.agency.id, (tx) => tx.select().from(mpcRestrictions));
-    expect(restrictions).toHaveLength(0);
+    expect(await withAgency(f.agency.id, (tx) => tx.select().from(mpcRestrictions))).toHaveLength(0);
   });
 
   test("accepted restrictions are saved", async () => {
     const id = await newMpc(f.recA);
     await seedDocs(id);
-    const draft = await draftFor(id);
-    await asMember(f.recA, () => applyExtraction(id, { draft, fields: {}, factIndexes: [], restrictionIndexes: [0] }));
+    const s = await draftFor(id);
+    await asMember(f.recA, () => applyExtraction(id, accept(s, { restrictionIndexes: [0] })));
     const rows = await withAgency(f.agency.id, (tx) => tx.select().from(mpcRestrictions));
     expect(rows.map((x) => [x.kind, x.value])).toEqual([["never_say", "the Acme merger"]]);
   });
 
-  test("a fact whose quote is not in a stored document is dropped even if the client sends it", async () => {
+  test("a forged fact text with a valid tiny quote is rejected and nothing is written", async () => {
     const id = await newMpc(f.recA);
     await seedDocs(id);
-    const draft = await draftFor(id);
-    draft.facts.push({ text: "Forged", sourceKind: "resume", sourceRef: "resume.txt", sourceQuote: "Not in the document" });
-    await asMember(f.recA, () => applyExtraction(id, { draft, fields: {}, factIndexes: [0, 1, 2], restrictionIndexes: [] }));
-    expect((await factsOf(f.recA, id)).map((x) => x.text).sort()).toEqual(["Led discovery on a large matter", "Open to Denver"]);
+    const s = await draftFor(id);
+    const forged = {
+      ...s.draft,
+      facts: [{ text: "Won a $50M verdict", sourceKind: "resume" as const, sourceRef: "resume.txt", sourceQuote: "a" }],
+    };
+    const r = await asMember(f.recA, () => applyExtraction(id, accept({ ...s, draft: forged }, { factIndexes: [0] })));
+    expect(r).toEqual(STALE);
+    expect(await factsOf(f.recA, id)).toHaveLength(0);
   });
 
-  test("a status sent by the client is ignored: notes facts are interview_only", async () => {
+  test("a quote under 20 characters is dropped even when it is in the document", async () => {
     const id = await newMpc(f.recA);
     await seedDocs(id);
-    const draft = await draftFor(id);
-    const sneaky = draft.facts.map((x) => ({ ...x, status: "confirmed" }));
-    await asMember(f.recA, () =>
-      applyExtraction(id, { draft: { ...draft, facts: sneaky as never }, fields: {}, factIndexes: [0, 1], restrictionIndexes: [] }),
+    setTestGenerate(
+      fakeGenerate({
+        facts: [{ text: "Tiny", sourceKind: "resume", sourceRef: "resume.txt", sourceQuote: "Led discovery" }],
+      }),
     );
-    expect((await factsOf(f.recA, id)).find((x) => x.text === "Open to Denver")?.status).toBe("interview_only");
+    const r = await asMember(f.recA, () => runExtraction(id));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.draft.facts).toEqual([]);
+  });
+
+  test("altering any field, fact or restriction after signing is rejected", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const s = await draftFor(id);
+    const tampered: ProfileDraft[] = [
+      { ...s.draft, fields: { ...s.draft.fields, yearsExperience: 30 } },
+      { ...s.draft, facts: s.draft.facts.map((x, i) => (i === 0 ? { ...x, text: "Changed text" } : x)) },
+      { ...s.draft, facts: [...s.draft.facts, { ...s.draft.facts[0], text: "Added" }] },
+      { ...s.draft, restrictionsSuggested: [{ kind: "never_say", value: "something else" }] },
+    ];
+    for (const draft of tampered) {
+      const r = await asMember(f.recA, () =>
+        applyExtraction(id, accept({ ...s, draft }, { factIndexes: [0], restrictionIndexes: [0] })),
+      );
+      expect(r).toEqual(STALE);
+    }
+    expect(await factsOf(f.recA, id)).toHaveLength(0);
+  });
+
+  test("accepted fields must be the signed proposals; pay fields are never written", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const s = await draftFor(id);
+    expect(await asMember(f.recA, () => applyExtraction(id, accept(s, { fields: { yearsExperience: -4 } })))).toEqual(STALE);
+    const r = await asMember(f.recA, () =>
+      applyExtraction(id, accept(s, { fields: { payTarget: 500000, yearsExperience: 9 } as never })),
+    );
+    expect(r).toEqual(STALE);
+    const [row] = await withAgency(f.agency.id, (tx) => tx.select().from(mpcs).where(eq(mpcs.id, id)));
+    expect(row.payTarget).toBeNull();
+    expect(row.yearsExperience).toBe(8);
+  });
+
+  test("a missing or wrong signature is rejected", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const s = await draftFor(id);
+    for (const signature of ["", "zz", "0".repeat(64), undefined as never]) {
+      expect(
+        await asMember(f.recA, () => applyExtraction(id, accept({ ...s, signature }, { factIndexes: [0] }))),
+      ).toEqual(STALE);
+    }
+  });
+
+  test("an expired draft is rejected", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const s = await draftFor(id);
+    const issuedAt = Date.now() - 25 * 60 * 60 * 1000;
+    const signature = signDraft({ mpcId: id, userId: f.recA.userId, issuedAt, draft: s.draft });
+    expect(
+      await asMember(f.recA, () => applyExtraction(id, accept({ ...s, issuedAt, signature }, { factIndexes: [0] }))),
+    ).toEqual(STALE);
+    const fresh = Date.now() - 23 * 60 * 60 * 1000;
+    const ok = signDraft({ mpcId: id, userId: f.recA.userId, issuedAt: fresh, draft: s.draft });
+    const r = await asMember(f.recA, () =>
+      applyExtraction(id, accept({ ...s, issuedAt: fresh, signature: ok }, { factIndexes: [0] })),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test("a draft signed for another MPC or another user is rejected", async () => {
+    const id = await newMpc(f.recA);
+    const other = await newMpc(f.recA);
+    await seedDocs(id);
+    await seedDocs(other);
+    const forOther = await draftFor(other);
+    expect(await asMember(f.recA, () => applyExtraction(id, accept(forOther, { factIndexes: [0] })))).toEqual(STALE);
+    // Admin may edit the MPC, but a draft run by recA is not valid for admin.
+    const byRecA = await draftFor(id);
+    expect(await asMember(f.admin, () => applyExtraction(id, accept(byRecA, { factIndexes: [0] })))).toEqual(STALE);
+    expect(await factsOf(f.recA, id)).toHaveLength(0);
+    // The admin's own run works.
+    const byAdmin = await draftFor(id, f.admin);
+    expect((await asMember(f.admin, () => applyExtraction(id, accept(byAdmin, { factIndexes: [0] })))).ok).toBe(true);
   });
 
   test("applying twice does not duplicate facts", async () => {
     const id = await newMpc(f.recA);
     await seedDocs(id);
-    const draft = await draftFor(id);
-    const accepted = { draft, fields: {}, factIndexes: [0, 1], restrictionIndexes: [] };
+    const s = await draftFor(id);
+    const accepted = accept(s, { factIndexes: [0, 1] });
     await asMember(f.recA, () => applyExtraction(id, accepted));
     await asMember(f.recA, () => applyExtraction(id, accepted));
     expect(await factsOf(f.recA, id)).toHaveLength(2);
   });
 
-  test("invalid fields are refused and nothing is written", async () => {
+  test("permission: a teammate recruiter cannot apply", async () => {
     const id = await newMpc(f.recA);
     await seedDocs(id);
-    const draft = await draftFor(id);
-    const r = await asMember(f.recA, () =>
-      applyExtraction(id, { draft, fields: { yearsExperience: -4 }, factIndexes: [0], restrictionIndexes: [0] }),
-    );
-    expect(r.ok).toBe(false);
-    expect(await factsOf(f.recA, id)).toHaveLength(0);
-  });
-
-  test("pay fields cannot be written through extraction", async () => {
-    const id = await newMpc(f.recA);
-    await seedDocs(id);
-    const draft = await draftFor(id);
-    await asMember(f.recA, () =>
-      applyExtraction(id, { draft, fields: { payTarget: 500000, yearsExperience: 10 } as never, factIndexes: [], restrictionIndexes: [] }),
-    );
-    const [row] = await withAgency(f.agency.id, (tx) => tx.select().from(mpcs).where(eq(mpcs.id, id)));
-    expect(row.payTarget).toBeNull();
-    expect(row.yearsExperience).toBe(10);
-  });
-
-  test("permission and tenancy", async () => {
-    const id = await newMpc(f.recA);
-    await seedDocs(id);
-    const draft = await draftFor(id);
-    const accepted = { draft, fields: {}, factIndexes: [0], restrictionIndexes: [] };
-    expect(await asMember(f.recB, () => applyExtraction(id, accepted))).toEqual({
+    const s = await draftFor(id);
+    expect(await asMember(f.recB, () => applyExtraction(id, accept(s, { factIndexes: [0] })))).toEqual({
       ok: false,
       error: "You can only edit your own MPCs.",
     });
-    expect((await asMember(f.admin, () => applyExtraction(id, accepted))).ok).toBe(true);
-    const rows = await withAgency(f.agency.id, (tx) => tx.select().from(mpcFacts));
-    expect(rows).toHaveLength(1);
+  });
+
+  test("without RGE_DRAFT_SECRET both actions refuse", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const s = await draftFor(id);
+    delete process.env.RGE_DRAFT_SECRET;
+    const msg = { ok: false, error: "Extraction is not configured yet." };
+    expect(await asMember(f.recA, () => runExtraction(id))).toEqual(msg);
+    expect(await asMember(f.recA, () => applyExtraction(id, accept(s, { factIndexes: [0] })))).toEqual(msg);
   });
 });

@@ -50,7 +50,7 @@ export function AddSources({ mpcId, documents }: { mpcId: string; documents: Doc
   const [mode, setMode] = useState<"file" | "paste">("file");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [draft, setDraft] = useState<ProfileDraft | null>(null);
+  const [draft, setDraft] = useState<{ draft: ProfileDraft; issuedAt: number; signature: string } | null>(null);
   const [adding, startAdd] = useTransition();
   const [extracting, startExtract] = useTransition();
 
@@ -80,7 +80,7 @@ export function AddSources({ mpcId, documents }: { mpcId: string; documents: Doc
     setDraft(null);
     startExtract(async () => {
       const result = await runExtraction(mpcId);
-      if (result.ok) setDraft(result.draft);
+      if (result.ok) setDraft({ draft: result.draft, issuedAt: result.issuedAt, signature: result.signature });
       else setError(result.error);
     });
   }
@@ -167,7 +167,12 @@ export function AddSources({ mpcId, documents }: { mpcId: string; documents: Doc
           {notice}
         </p>
       )}
-      {draft && <ExtractionReview mpcId={mpcId} draft={draft} onClose={() => setDraft(null)} />}
+      {draft && <ExtractionReview
+          mpcId={mpcId}
+          draft={draft.draft}
+          issuedAt={draft.issuedAt}
+          signature={draft.signature}
+          onClose={() => setDraft(null)} />}
     </div>
   );
 }

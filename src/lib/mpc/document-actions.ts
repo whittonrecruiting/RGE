@@ -18,18 +18,24 @@ import {
 } from "@/lib/ai/extract-profile";
 import { getGenerate } from "@/lib/ai/models";
 import { putFile } from "@/lib/storage";
+import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing";
 import { toSources } from "./document-queries";
 import { isUuid } from "./queries";
 import { mpcInput, type MpcInput } from "./schema";
 
 export type DocKind = "resume" | "notes" | "transcript";
 export type AddDocumentResult = { ok: true; documentId: string } | { ok: false; error: string };
-export type ExtractionResult = { ok: true; draft: ProfileDraft } | { ok: false; error: string };
+export type ExtractionResult =
+  | { ok: true; draft: ProfileDraft; issuedAt: number; signature: string }
+  | { ok: false; error: string };
 export type ApplyResult = { ok: true } | { ok: false; error: string };
 
 /** What the reviewer accepted. The draft is sent back and re-checked against the stored documents. */
 export type AcceptedExtraction = {
   draft: ProfileDraft;
+  /** From runExtraction. The draft cannot be edited or extended after signing. */
+  issuedAt: number;
+  signature: string;
   fields: Partial<MpcInput>;
   factIndexes: number[];
   restrictionIndexes: number[];
@@ -40,6 +46,8 @@ const NOT_YOURS = "You can only edit your own MPCs.";
 const BAD_KIND = "Choose resume, notes or transcript.";
 const NO_INPUT = "Paste some text or choose a file.";
 const TOO_LONG = "That text is too long. Paste up to 200,000 characters.";
+const NOT_CONFIGURED = "Extraction is not configured yet.";
+const STALE = "This review is out of date. Run the extraction again.";
 const NO_DOCS = "Add a resume, notes or a transcript first.";
 const EXTRACT_FAILED = "The extraction did not finish. Try again.";
 const MAX_PASTED = 200_000;
@@ -130,12 +138,15 @@ async function loadSources(member: Member, mpcId: string) {
 /** Reads the MPC's documents and proposes a profile for review. Saves nothing. */
 export async function runExtraction(mpcId: string): Promise<ExtractionResult> {
   const member = await requireMember();
+  if (!draftSigningConfigured()) return fail(NOT_CONFIGURED);
   const denied = await authorize(member, mpcId);
   if (denied) return fail(denied);
   const sources = await loadSources(member, mpcId);
   if (sources.length === 0) return fail(NO_DOCS);
   try {
-    return { ok: true, draft: await extractProfile(sources, { generate: getGenerate() }) };
+    const draft = await extractProfile(sources, { generate: getGenerate() });
+    const issuedAt = Date.now();
+    return { ok: true, draft, issuedAt, signature: signDraft({ mpcId, userId: member.userId, issuedAt, draft }) };
   } catch (err) {
     // Log the reason only, never the document text.
     console.error("Profile extraction failed:", err instanceof Error ? err.message : "unknown error");
@@ -159,10 +170,22 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
   const denied = await authorize(member, mpcId);
   if (denied) return fail(denied);
 
+  if (!draftSigningConfigured()) return fail(NOT_CONFIGURED);
   const draft = accepted?.draft;
+  if (!draft || !verifyDraft({ mpcId, userId: member.userId, issuedAt: accepted.issuedAt, draft }, accepted.signature)) {
+    return fail(STALE);
+  }
   const draftFacts: DraftFact[] = Array.isArray(draft?.facts) ? draft.facts : [];
   const draftRestrictions = cleanRestrictions(draft?.restrictionsSuggested);
   const fields = cleanFields(accepted?.fields);
+  // Accepted fields must be exactly the signed proposals: the client may pick, never change.
+  const sentFields = (accepted.fields ?? {}) as Record<string, unknown>;
+  for (const k of Object.keys(sentFields)) {
+    if (sentFields[k] == null) continue;
+    if (JSON.stringify(sentFields[k]) !== JSON.stringify((draft.fields as Record<string, unknown> | undefined)?.[k])) {
+      return fail(STALE);
+    }
+  }
   // A field the reviewer accepted that does not pass the basic checks is an error, not a silent skip.
   const sent = (accepted?.fields ?? {}) as Record<string, unknown>;
   if (EXTRACTABLE_FIELDS.some((k) => sent[k] != null && !(k in fields))) {

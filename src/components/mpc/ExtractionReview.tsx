@@ -47,10 +47,14 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
 export function ExtractionReview({
   mpcId,
   draft,
+  issuedAt,
+  signature,
   onClose,
 }: {
   mpcId: string;
   draft: ProfileDraft;
+  issuedAt: number;
+  signature: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -71,6 +75,8 @@ export function ExtractionReview({
     start(async () => {
       const result = await applyExtraction(mpcId, {
         draft,
+        issuedAt,
+        signature,
         fields: accepted,
         factIndexes: [...facts],
         restrictionIndexes: [...restrictions],
