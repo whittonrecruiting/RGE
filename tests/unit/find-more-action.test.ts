@@ -106,6 +106,23 @@ describe("applyFindMore", () => {
     });
   });
 
+  test("facts that fail the fact text rules are dropped and the rest are saved", async () => {
+    const id = await newMpc(f.recA);
+    setTestGenerate(
+      fakeGenerate({
+        facts: [
+          { text: `Published ${String.fromCharCode(0x2014)} widely`, url: "https://example.test/a", quote: Q1 },
+          { text: "y".repeat(301), url: "https://example.test/a", quote: Q1 },
+          { text: "Named a top insurance lawyer", url: "https://example.test/b", quote: Q2 },
+        ],
+      }),
+    );
+    const s = await asMember(f.recA, () => runFindMore(id, ""));
+    if (!s.ok) throw new Error(s.error);
+    expect(await asMember(f.recA, () => applyFindMore(id, { ...s, factIndexes: [0, 1, 2] }))).toEqual({ ok: true });
+    expect((await factsOf(f.recA, id)).map((x) => x.text)).toEqual(["Named a top insurance lawyer"]);
+  });
+
   test("skips a fact already saved with the same text and url", async () => {
     const id = await newMpc(f.recA);
     const s = await signed(id);

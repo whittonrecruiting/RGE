@@ -3,7 +3,8 @@ import { EMPLOYER_TYPES, WORK_MODES, type MpcInput } from "@/lib/mpc/schema";
 import { defaultGenerate, type GenerateFn } from "./models";
 
 export type SourceKind = "resume" | "notes" | "transcript";
-export type Source = { kind: SourceKind; text: string; ref: string };
+/** documentId: the stored document the source came from (never sent to the model). */
+export type Source = { kind: SourceKind; text: string; ref: string; documentId?: string };
 
 export type DraftFact = { text: string; sourceKind: SourceKind; sourceRef: string; sourceQuote: string };
 

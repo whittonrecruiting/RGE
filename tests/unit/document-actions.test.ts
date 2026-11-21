@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { mpcDocuments, mpcRestrictions, mpcs } from "@/db/schema";
+import { mpcDocuments, mpcFacts, mpcRestrictions, mpcs } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { createMpc } from "@/lib/mpc/actions";
 import { addDocument, applyExtraction, runExtraction } from "@/lib/mpc/document-actions";
@@ -325,6 +325,45 @@ describe("applyExtraction", () => {
     // The admin's own run works.
     const byAdmin = await draftFor(id, f.admin);
     expect((await asMember(f.admin, () => applyExtraction(id, accept(byAdmin, { factIndexes: [0] })))).ok).toBe(true);
+  });
+
+  test("facts that fail the fact text rules are dropped and the rest are saved", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const quote = "Led discovery on a $120M breach of contract matter";
+    setTestGenerate(
+      fakeGenerate({
+        facts: [
+          { text: `Led discovery ${String.fromCharCode(0x2014)} big`, sourceKind: "resume", sourceRef: "resume.txt", sourceQuote: quote },
+          { text: "x".repeat(301), sourceKind: "resume", sourceRef: "resume.txt", sourceQuote: quote },
+          { text: "  Led discovery on a breach of contract matter  ", sourceKind: "resume", sourceRef: "resume.txt", sourceQuote: quote },
+        ],
+      }),
+    );
+    const r = await asMember(f.recA, () => runExtraction(id));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.draft.facts).toHaveLength(3);
+    const applied = await asMember(f.recA, () =>
+      applyExtraction(id, accept({ draft: r.draft, issuedAt: r.issuedAt, signature: r.signature }, { factIndexes: [0, 1, 2] })),
+    );
+    expect(applied).toEqual({ ok: true });
+    expect((await factsOf(f.recA, id)).map((x) => x.text)).toEqual(["Led discovery on a breach of contract matter"]);
+  });
+
+  test("an extracted fact points at its source document by id and keeps the name as source_ref", async () => {
+    const id = await newMpc(f.recA);
+    await seedDocs(id);
+    const s = await draftFor(id);
+    await asMember(f.recA, () => applyExtraction(id, accept(s, { factIndexes: [0, 1] })));
+    const docs = await withAgency(f.agency.id, (tx) => tx.select().from(mpcDocuments));
+    const facts = await withAgency(f.agency.id, (tx) => tx.select().from(mpcFacts));
+    const byName = Object.fromEntries(docs.map((d) => [d.filename, d.id]));
+    expect(facts.map((x) => [x.sourceRef, x.sourceDocumentId]).sort()).toEqual(
+      [
+        ["Pasted notes", byName["Pasted notes"]],
+        ["resume.txt", byName["resume.txt"]],
+      ].sort(),
+    );
   });
 
   test("applying twice does not duplicate facts", async () => {

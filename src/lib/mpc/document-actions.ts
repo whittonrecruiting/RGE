@@ -20,6 +20,7 @@ import { getGenerate } from "@/lib/ai/models";
 import { putFile } from "@/lib/storage";
 import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing";
 import { toSources } from "./document-queries";
+import { cleanFactText } from "./fact-text";
 import { isUuid } from "./queries";
 import { mpcInput, type MpcInput } from "./schema";
 
@@ -127,7 +128,7 @@ export async function addDocument(mpcId: string, formData: FormData): Promise<Ad
 async function loadSources(member: Member, mpcId: string) {
   const docs = await withAgency(member.agencyId, (tx) =>
     tx
-      .select({ kind: mpcDocuments.kind, filename: mpcDocuments.filename, text: mpcDocuments.text })
+      .select({ id: mpcDocuments.id, kind: mpcDocuments.kind, filename: mpcDocuments.filename, text: mpcDocuments.text })
       .from(mpcDocuments)
       .where(eq(mpcDocuments.mpcId, mpcId))
       .orderBy(mpcDocuments.createdAt, mpcDocuments.id),
@@ -195,10 +196,15 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
   const restrictionIndexes = validIndexes(accepted?.restrictionIndexes, draftRestrictions.length);
 
   const sources = await loadSources(member, mpcId);
+  const documentIdOf = new Map(sources.map((s) => [s.ref, s.documentId ?? null]));
+  // Same text rules as a fact typed by hand. A fact that fails them is dropped, not the whole save.
   const facts = verifyFacts(
     factIndexes.map((i) => draftFacts[i]),
     sources,
-  );
+  ).flatMap((f) => {
+    const clean = cleanFactText(f.text);
+    return clean.ok ? [{ ...f, text: clean.text }] : [];
+  });
   const restrictions = restrictionIndexes.map((i) => draftRestrictions[i]);
 
   const result = await withAgency(member.agencyId, async (tx): Promise<ApplyResult> => {
@@ -249,6 +255,7 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
             text: f.text,
             sourceKind: f.sourceKind,
             sourceRef: f.sourceRef,
+            sourceDocumentId: documentIdOf.get(f.sourceRef) ?? null,
             sourceQuote: f.sourceQuote,
             status: f.sourceKind === "resume" ? ("usable" as const) : ("interview_only" as const),
           })),

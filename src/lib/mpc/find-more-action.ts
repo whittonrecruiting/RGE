@@ -9,6 +9,7 @@ import { can } from "@/lib/permissions";
 import { cleanFoundFacts, findMore, MAX_HINTS_CHARS, type FoundFact } from "@/lib/ai/find-more";
 import { getGenerate } from "@/lib/ai/models";
 import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing";
+import { cleanFactText } from "./fact-text";
 import { isUuid } from "./queries";
 
 /** What a search proposes. The kind keeps it from being mistaken for a profile extraction draft. */
@@ -103,7 +104,11 @@ export async function applyFindMore(mpcId: string, accepted: AcceptedFindMore): 
   // Defence in depth: signed content is re-checked against the same rules before it is written.
   const draftFacts = cleanFoundFacts(draft.facts);
   if (draftFacts.length !== draft.facts.length) return fail(STALE);
-  const chosen = validIndexes(accepted.factIndexes, draftFacts.length).map((i) => draftFacts[i]);
+  // Same text rules as a fact typed by hand. A fact that fails them is dropped, not the whole save.
+  const chosen = validIndexes(accepted.factIndexes, draftFacts.length).flatMap((i) => {
+    const clean = cleanFactText(draftFacts[i].text);
+    return clean.ok ? [{ ...draftFacts[i], text: clean.text }] : [];
+  });
 
   const result = await withAgency(member.agencyId, async (tx): Promise<ApplyFindMoreResult> => {
     const existing = await tx

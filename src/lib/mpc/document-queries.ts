@@ -38,14 +38,19 @@ export async function listDocuments(member: Member, mpcId: string): Promise<Docu
  * Turns stored documents into extraction sources. The ref is the filename; a repeated filename
  * gets a counter so every ref points at exactly one document.
  */
-export function toSources(docs: Pick<DocumentRow, "kind" | "filename" | "text">[]): Source[] {
+export function toSources(docs: (Pick<DocumentRow, "kind" | "filename" | "text"> & { id?: string })[]): Source[] {
   const used = new Map<string, number>();
   const sources: Source[] = [];
   for (const d of docs) {
     if (!d.text || d.text.trim() === "") continue;
     const n = (used.get(d.filename) ?? 0) + 1;
     used.set(d.filename, n);
-    sources.push({ kind: d.kind, text: d.text, ref: n === 1 ? d.filename : `${d.filename} (${n})` });
+    sources.push({
+      kind: d.kind,
+      text: d.text,
+      ref: n === 1 ? d.filename : `${d.filename} (${n})`,
+      ...(d.id ? { documentId: d.id } : {}),
+    });
   }
   return sources;
 }
