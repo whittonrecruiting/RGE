@@ -1,0 +1,36 @@
+# Local-only data: candidate rosters, handoffs, exports
+private/
+*.csv
+*.xlsx
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+credentials*.json
+token*.json
+
+# Dependencies and builds
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Claude Code local settings
+.claude/settings.local.json
