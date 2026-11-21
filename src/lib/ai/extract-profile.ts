@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { EMPLOYER_TYPES, WORK_MODES, type MpcInput } from "@/lib/mpc/schema";
-import { defaultGenerate, type GenerateFn } from "./models";
+import { defaultGenerate, type AiUsage, type GenerateFn } from "./models";
 
 export type SourceKind = "resume" | "notes" | "transcript";
 /** documentId: the stored document the source came from (never sent to the model). */
@@ -144,10 +144,13 @@ export function cleanRestrictions(raw: unknown): DraftRestriction[] {
  * Proposes profile fields, facts and restrictions from the sources. Nothing is saved here.
  * Facts the sources do not back up with an exact quote are dropped.
  */
-export async function extractProfile(sources: Source[], deps: { generate?: GenerateFn } = {}): Promise<ProfileDraft> {
+export async function extractProfile(
+  sources: Source[],
+  deps: { generate?: GenerateFn; onUsage?: (usage: AiUsage) => void } = {},
+): Promise<ProfileDraft> {
   if (sources.length === 0) return { fields: {}, facts: [], restrictionsSuggested: [] };
   const generate = deps.generate ?? defaultGenerate;
-  const out = (await generate({ schema: extractionSchema, system: SYSTEM, prompt: buildPrompt(sources) })) as
+  const out = (await generate({ schema: extractionSchema, system: SYSTEM, prompt: buildPrompt(sources), onUsage: deps.onUsage })) as
     | Partial<z.infer<typeof extractionSchema>>
     | undefined;
   return {

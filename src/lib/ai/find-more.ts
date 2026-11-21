@@ -1,6 +1,6 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
-import { defaultGenerate, type GenerateFn } from "./models";
+import { defaultGenerate, type AiUsage, type GenerateFn } from "./models";
 
 export type FoundFact = { text: string; url: string; quote: string };
 export type FindMoreMpc = { headlineRole: string; location: string; specialtyTags: string[]; facts: string[] };
@@ -86,7 +86,7 @@ function buildPrompt(mpc: FindMoreMpc, hints: string): string {
 export async function findMore(
   mpc: FindMoreMpc,
   hints: string,
-  deps: { generate?: GenerateFn } = {},
+  deps: { generate?: GenerateFn; onUsage?: (usage: AiUsage) => void } = {},
 ): Promise<{ facts: FoundFact[] }> {
   const generate = deps.generate ?? defaultGenerate;
   const out = (await generate({
@@ -94,6 +94,7 @@ export async function findMore(
     system: SYSTEM,
     prompt: buildPrompt(mpc, hints),
     tools: { web_search: anthropic.tools.webSearch_20260318({ maxUses: 5 }) },
+    onUsage: deps.onUsage,
   })) as { facts?: unknown } | undefined;
   return { facts: cleanFoundFacts(out?.facts) };
 }

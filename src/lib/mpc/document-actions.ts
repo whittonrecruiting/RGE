@@ -17,6 +17,7 @@ import {
   type ProfileDraft,
 } from "@/lib/ai/extract-profile";
 import { getGenerate } from "@/lib/ai/models";
+import { meteredAiCall } from "@/lib/ai/usage";
 import { putFile } from "@/lib/storage";
 import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing";
 import { toSources } from "./document-queries";
@@ -145,7 +146,11 @@ export async function runExtraction(mpcId: string): Promise<ExtractionResult> {
   const sources = await loadSources(member, mpcId);
   if (sources.length === 0) return fail(NO_DOCS);
   try {
-    const draft = await extractProfile(sources, { generate: getGenerate() });
+    const run = await meteredAiCall(member, "extraction", (onUsage) =>
+      extractProfile(sources, { generate: getGenerate(), onUsage }),
+    );
+    if ("limited" in run) return fail(run.limited);
+    const draft = run.value;
     const issuedAt = Date.now();
     return { ok: true, draft, issuedAt, signature: signDraft({ mpcId, userId: member.userId, issuedAt, draft }) };
   } catch (err) {

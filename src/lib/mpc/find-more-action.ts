@@ -8,6 +8,7 @@ import { requireMember, type Member } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cleanFoundFacts, findMore, MAX_HINTS_CHARS, type FoundFact } from "@/lib/ai/find-more";
 import { getGenerate } from "@/lib/ai/models";
+import { meteredAiCall } from "@/lib/ai/usage";
 import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing";
 import { cleanFactText } from "./fact-text";
 import { isUuid } from "./queries";
@@ -69,16 +70,20 @@ export async function runFindMore(mpcId: string, hints: string): Promise<FindMor
     tx.select({ text: mpcFacts.text }).from(mpcFacts).where(eq(mpcFacts.mpcId, mpcId)),
   );
   try {
-    const { facts } = await findMore(
-      {
-        headlineRole: auth.mpc.headlineRole,
-        location: auth.mpc.location,
-        specialtyTags: auth.mpc.specialtyTags,
-        facts: known.map((k) => k.text),
-      },
-      hintText,
-      { generate: getGenerate() },
+    const run = await meteredAiCall(member, "find_more", (onUsage) =>
+      findMore(
+        {
+          headlineRole: auth.mpc.headlineRole,
+          location: auth.mpc.location,
+          specialtyTags: auth.mpc.specialtyTags,
+          facts: known.map((k) => k.text),
+        },
+        hintText,
+        { generate: getGenerate(), onUsage },
+      ),
     );
+    if ("limited" in run) return fail(run.limited);
+    const { facts } = run.value;
     const draft: FindMoreDraft = { kind: "find_more", facts };
     const issuedAt = Date.now();
     return { ok: true, draft, issuedAt, signature: signDraft({ mpcId, userId: member.userId, issuedAt, draft }) };
