@@ -41,3 +41,7 @@ npm-debug.log*
 # Test output
 test-results/
 playwright-report/
+
+# Next.js / Vercel
+next-env.d.ts
+.vercel
