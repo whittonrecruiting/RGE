@@ -76,3 +76,38 @@ export async function seedAgencies(db: TestDb, n: number): Promise<SeededAgency[
     return seeded;
   });
 }
+
+export type SeedFactOptions = {
+  agencyId: string;
+  mpcId: string;
+  status?: "usable" | "interview_only" | "confirmed";
+  text?: string;
+  sourceKind?: "resume" | "notes" | "transcript" | "web" | "manual";
+  sourceRef?: string | null;
+};
+
+/** Inserts one fact, bypassing row-level security. Test setup only. */
+export async function seedFact(db: TestDb, opts: SeedFactOptions): Promise<{ id: string }> {
+  return asOwner(db, async (tx) => {
+    const [row] = await tx
+      .insert(schema.mpcFacts)
+      .values({
+        agencyId: opts.agencyId,
+        mpcId: opts.mpcId,
+        text: opts.text ?? `Fact ${randomUUID().slice(0, 8)}`,
+        sourceKind: opts.sourceKind ?? "notes",
+        sourceRef: opts.sourceRef ?? null,
+        status: opts.status ?? "usable",
+      })
+      .returning({ id: schema.mpcFacts.id });
+    return row;
+  });
+}
+
+/** Reads one fact, bypassing row-level security. Test assertions only. */
+export async function getFact(db: TestDb, id: string) {
+  return asOwner(db, async (tx) => {
+    const [row] = await tx.select().from(schema.mpcFacts).where(sql`${schema.mpcFacts.id} = ${id}`);
+    return row;
+  });
+}
