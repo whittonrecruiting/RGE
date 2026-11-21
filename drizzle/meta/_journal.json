@@ -15,6 +15,20 @@
       "when": 1795295095439,
       "tag": "0001_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795295435854,
+      "tag": "0002_same_agency_fks",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795295452337,
+      "tag": "0003_rls_users_memberships",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { sql } from "drizzle-orm";
-import { agencies, memberships, mpcs } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { agencies, memberships, mpcFacts, mpcs, users } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { neonDb } from "@/db/client";
 import { asOwner, createTestDb, seedAgencies } from "../../helpers/test-db";
@@ -97,7 +97,7 @@ describe("agency isolation (row-level security)", () => {
     expect(seen.memberships.map((m) => m.role).sort()).toEqual(["admin", "owner", "recruiter", "recruiter"]);
   });
 
-  test("every agency-owned table has RLS enabled and forced; users is global", async () => {
+  test("every table, including global users, has RLS enabled and forced", async () => {
     const { db } = await setup(1);
     const res = (await asOwner(db, (tx) =>
       tx.execute(sql`
@@ -110,18 +110,116 @@ describe("agency isolation (row-level security)", () => {
       "mpc_restrictions", "mpc_consents", "mpc_documents", "agency_settings",
     ];
     expect(Object.keys(byName).sort()).toEqual([...scoped, "users"].sort());
-    for (const t of scoped) expect(byName[t], t).toMatchObject({ enabled: true, forced: true });
-    expect(byName.users).toMatchObject({ enabled: false });
+    for (const t of [...scoped, "users"]) expect(byName[t], t).toMatchObject({ enabled: true, forced: true });
   });
 
-  test("src/db/rls.sql is the custom migration that drizzle applies", () => {
+  test("src/db/rls.sql is the concatenation of the custom RLS migrations drizzle applies", () => {
     const dir = join(process.cwd(), "drizzle");
-    const rlsMigration = readdirSync(dir).find((f) => f.endsWith(".sql") && f.includes("rls"));
-    expect(rlsMigration).toBeDefined();
     const normalize = (s: string) => s.replace(/\r\n/g, "\n").trim();
-    expect(normalize(readFileSync(join(dir, rlsMigration!), "utf8"))).toBe(
-      normalize(readFileSync(join(process.cwd(), "src/db/rls.sql"), "utf8")),
+    const rlsMigrations = readdirSync(dir)
+      .filter((f) => /^\d{4}_rls.*\.sql$/.test(f))
+      .sort();
+    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql"]);
+    const combined = rlsMigrations.map((f) => normalize(readFileSync(join(dir, f), "utf8"))).join("\n\n");
+    expect(combined).toBe(normalize(readFileSync(join(process.cwd(), "src/db/rls.sql"), "utf8")));
+  });
+});
+
+describe("global users table", () => {
+  test("an agency sees and edits only its own members; no context sees no users", async () => {
+    const { db, agencies: [a, b] } = await setup();
+    const aMembers = [a.ownerId, a.adminId, a.recruiterId, a.recruiter2Id].sort();
+    const seenByA = await withAgency(a.id, (tx) => tx.select().from(users));
+    expect(seenByA.map((u) => u.id).sort()).toEqual(aMembers);
+    const updated = await withAgency(a.id, (tx) =>
+      tx.update(users).set({ email: "hijack@example.test" }).where(eq(users.id, b.ownerId)).returning(),
     );
+    expect(updated).toHaveLength(0);
+    const [bOwner] = await asOwner(db, (tx) => tx.select().from(users).where(eq(users.id, b.ownerId)));
+    expect(bOwner.email).not.toBe("hijack@example.test");
+    expect(await db.select().from(users)).toHaveLength(0);
+    // Own members stay editable, so the restriction is not simply "no updates".
+    const renamed = await withAgency(a.id, (tx) =>
+      tx.update(users).set({ name: "Renamed" }).where(eq(users.id, a.recruiterId)).returning(),
+    );
+    expect(renamed).toHaveLength(1);
+  });
+
+  test("rge_app cannot create users or change a user's identity", async () => {
+    const { agencies: [a] } = await setup(1);
+    await expect(
+      withAgency(a.id, (tx) => tx.insert(users).values({ clerkUserId: "user_x", email: "x@example.test", name: "X" })),
+    ).rejects.toThrow();
+    await expect(
+      withAgency(a.id, (tx) => tx.update(users).set({ clerkUserId: "user_stolen" }).where(eq(users.id, a.ownerId))),
+    ).rejects.toThrow();
+  });
+});
+
+describe("cross-agency links through foreign keys", () => {
+  async function setupWithMpcs() {
+    const ctx = await setup();
+    const [a, b] = ctx.agencies;
+    const [aMpc] = await withAgency(a.id, (tx) =>
+      tx
+        .insert(mpcs)
+        .values({ agencyId: a.id, ownerUserId: a.recruiterId, headlineRole: "A role", location: "Phoenix, AZ" })
+        .returning(),
+    );
+    const [bMpc] = await withAgency(b.id, (tx) =>
+      tx
+        .insert(mpcs)
+        .values({ agencyId: b.id, ownerUserId: b.recruiterId, headlineRole: "B role", location: "Denver, CO" })
+        .returning(),
+    );
+    return { ...ctx, a, b, aMpc, bMpc };
+  }
+
+  test("a child row in agency A cannot point at agency B's MPC", async () => {
+    const { a, aMpc, bMpc } = await setupWithMpcs();
+    await expect(
+      withAgency(a.id, (tx) =>
+        tx.insert(mpcFacts).values({ agencyId: a.id, mpcId: bMpc.id, text: "Fact", sourceKind: "manual" }),
+      ),
+    ).rejects.toThrow();
+    // The same insert against A's own MPC succeeds, so the rejection is the cross-agency link.
+    await withAgency(a.id, (tx) =>
+      tx.insert(mpcFacts).values({ agencyId: a.id, mpcId: aMpc.id, text: "Fact", sourceKind: "manual" }),
+    );
+  });
+
+  test("MPC owner and fact confirmer must be members of the same agency", async () => {
+    const { a, b, aMpc } = await setupWithMpcs();
+    await expect(
+      withAgency(a.id, (tx) => tx.update(mpcs).set({ ownerUserId: b.recruiterId }).where(eq(mpcs.id, aMpc.id))),
+    ).rejects.toThrow();
+    await expect(
+      withAgency(a.id, (tx) =>
+        tx.insert(mpcFacts).values({
+          agencyId: a.id,
+          mpcId: aMpc.id,
+          text: "Fact",
+          sourceKind: "manual",
+          confirmedBy: b.ownerId,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("rge_app cannot add members or move a membership to another user", async () => {
+    const { a, b } = await setupWithMpcs();
+    await expect(
+      withAgency(a.id, (tx) => tx.insert(memberships).values({ agencyId: a.id, userId: b.ownerId, role: "owner" })),
+    ).rejects.toThrow();
+    await expect(
+      withAgency(a.id, (tx) =>
+        tx.update(memberships).set({ userId: b.ownerId }).where(eq(memberships.userId, a.recruiterId)),
+      ),
+    ).rejects.toThrow();
+    const promoted = await withAgency(a.id, (tx) =>
+      tx.update(memberships).set({ role: "admin" }).where(eq(memberships.userId, a.recruiterId)).returning(),
+    );
+    expect(promoted.map((m) => m.role)).toEqual(["admin"]);
   });
 });
 
