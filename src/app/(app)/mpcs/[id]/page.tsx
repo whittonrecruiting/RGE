@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AddSources, DocumentList } from "@/components/mpc/AddSources";
 import { StatusBadge } from "@/components/mpc/badges";
 import { ProfileForm } from "@/components/mpc/profile-form";
 import { ProfileReadOnly } from "@/components/mpc/profile-readonly";
@@ -11,6 +12,7 @@ import { FlagBadge } from "@/components/mpc/badges";
 import { PageTitle } from "@/components/shell/page-title";
 import { requireMember } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { listDocuments, listFacts } from "@/lib/mpc/document-queries";
 import { getMpc, listActiveMembers } from "@/lib/mpc/queries";
 
 export const metadata: Metadata = { title: "MPC" };
@@ -26,6 +28,13 @@ export default async function MpcPage({ params }: Props) {
   const canEdit = can(member, "mpc.edit", { ownerUserId: mpc.ownerUserId });
   const canReassign = can(member, "team.manage");
   const members = canReassign ? await listActiveMembers(member) : [];
+  const [documents, facts] = await Promise.all([listDocuments(member, mpc.id), listFacts(member, mpc.id)]);
+  const documentItems = documents.map((d) => ({
+    id: d.id,
+    kind: d.kind,
+    filename: d.filename,
+    createdAt: d.createdAt.toISOString(),
+  }));
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -96,11 +105,35 @@ export default async function MpcPage({ params }: Props) {
         </Section>
       )}
 
-      <ComingNextSection title="Facts" />
+      <Section title="Facts">
+        {facts.length === 0 ? (
+          <p className="text-sm text-muted">
+            No facts yet.{canEdit ? " Add a resume, notes or a transcript below and run extraction." : ""}
+          </p>
+        ) : (
+          <ul className="flex min-w-0 flex-col divide-y divide-line rounded border border-line">
+            {facts.map((f) => (
+              <li key={f.id} className="flex min-w-0 flex-col gap-1 p-3">
+                <span className="text-sm text-text [overflow-wrap:anywhere]">{f.text}</span>
+                <span className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                  {f.sourceRef ? `Source: ${f.sourceRef}` : `Source: ${f.sourceKind}`}
+                  {f.status === "interview_only" && <FlagBadge>Interview only</FlagBadge>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
       <ComingNextSection title="Restrictions" />
       <ComingNextSection title="Credentials" />
       <ComingNextSection title="Consent" />
-      <ComingNextSection title="Documents" />
+      <Section title="Documents">
+        {canEdit ? (
+          <AddSources mpcId={mpc.id} documents={documentItems} />
+        ) : (
+          <DocumentList documents={documentItems} />
+        )}
+      </Section>
     </div>
   );
 }

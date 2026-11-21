@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/shell/app-shell";
 import { PageTitle } from "@/components/shell/page-title";
+import { AddSources } from "@/components/mpc/AddSources";
+import { ReviewPreview } from "./review-preview";
 import { FlagBadge, StatusBadge } from "@/components/mpc/badges";
 import { ListFilters } from "@/components/mpc/list-filters";
 import { MpcList } from "@/components/mpc/mpc-list";
@@ -67,6 +69,20 @@ const detail: MpcDetail = {
   updatedAt: new Date(0),
 };
 
+const sampleDocs = [
+  { id: "d1", kind: "resume" as const, filename: "jordan-example-resume-with-a-very-long-file-name-2026.pdf", createdAt: "2026-11-20T10:00:00.000Z" },
+  { id: "d2", kind: "notes" as const, filename: "Pasted notes", createdAt: "2026-11-21T10:00:00.000Z" },
+];
+
+const sampleDraft = {
+  fields: { yearsExperience: 8, specialtyTags: ["Commercial litigation", "Appeals"], workMode: "hybrid" as const },
+  facts: [
+    { text: "Led discovery on a $120M breach of contract matter", sourceKind: "resume" as const, sourceRef: "jordan-example-resume-with-a-very-long-file-name-2026.pdf", sourceQuote: "Led discovery on a $120M breach of contract matter" },
+    { text: "Open to relocating to Denver", sourceKind: "notes" as const, sourceRef: "Pasted notes", sourceQuote: "Candidate wants to relocate to Denver within the year." },
+  ],
+  restrictionsSuggested: [{ kind: "never_say" as const, value: "Do not mention the Acme merger" }],
+};
+
 type Props = { searchParams: Promise<{ view?: string }> };
 
 export default async function DevMpcsPage({ searchParams }: Props) {
@@ -108,6 +124,10 @@ export default async function DevMpcsPage({ searchParams }: Props) {
             )}
           </Section>
           <ComingNextSection title="Facts" />
+          <Section title="Documents">
+            <AddSources mpcId="a" documents={sampleDocs} />
+            {view === "detail" && <ReviewPreview draft={sampleDraft} />}
+          </Section>
         </div>
       </AppShell>
     );

@@ -22,6 +22,12 @@ export default async function NewMpcPage() {
       <Section title="Profile">
         <ProfileForm />
       </Section>
+      <Section title="Documents">
+        <p className="text-sm text-text-soft">
+          After you add the MPC, you can add a resume, notes or a transcript on its page and let the app propose the
+          profile and facts for your review.
+        </p>
+      </Section>
     </div>
   );
 }
