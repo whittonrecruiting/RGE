@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { agencies, agencySettings, memberships, mpcs, users } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { withSystem } from "@/db/with-system";
-import { createTestDb, seedAgencies } from "../../helpers/test-db";
+import { asOwner, createTestDb, seedAgencies } from "../../helpers/test-db";
 
 let close: (() => Promise<void>) | undefined;
 afterEach(async () => {
@@ -60,6 +60,18 @@ describe("withSystem (Clerk sync path)", () => {
     ).rejects.toSatisfy(permissionDenied);
     await expect(withSystem((tx) => tx.delete(mpcs))).rejects.toSatisfy(permissionDenied);
     await expect(withSystem((tx) => tx.select().from(agencySettings))).rejects.toSatisfy(permissionDenied);
+  });
+
+  test("cannot delete agencies, users or memberships, so no cascade can reach agency data", async () => {
+    const { db, agencies: [a] } = await setup(1);
+    await withAgency(a.id, (tx) =>
+      tx.insert(mpcs).values({ agencyId: a.id, ownerUserId: a.recruiterId, headlineRole: "Nurse", location: "Austin, TX" }),
+    );
+    await expect(withSystem((tx) => tx.delete(agencies).where(eq(agencies.id, a.id)))).rejects.toSatisfy(permissionDenied);
+    await expect(withSystem((tx) => tx.delete(users).where(eq(users.id, a.recruiterId)))).rejects.toSatisfy(permissionDenied);
+    await expect(withSystem((tx) => tx.delete(memberships))).rejects.toSatisfy(permissionDenied);
+    expect(await asOwner(db, (tx) => tx.select().from(mpcs))).toHaveLength(1);
+    expect(await asOwner(db, (tx) => tx.select().from(memberships))).toHaveLength(4);
   });
 
   test("rge_system does not bypass row-level security and is not a login role", async () => {

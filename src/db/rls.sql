@@ -87,7 +87,9 @@ BEGIN
 END
 $$;--> statement-breakpoint
 GRANT USAGE ON SCHEMA public TO rge_system;--> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON "agencies", "users", "memberships" TO rge_system;--> statement-breakpoint
+-- No DELETE: agency-owned tables cascade from agencies (and memberships from users), and
+-- referential actions run as the table owner, so DELETE here would reach mpcs and mpc_* rows.
+GRANT SELECT, INSERT, UPDATE ON "agencies", "users", "memberships" TO rge_system;--> statement-breakpoint
 CREATE POLICY system_sync ON "agencies" TO rge_system USING (true) WITH CHECK (true);--> statement-breakpoint
 CREATE POLICY system_sync ON "users" TO rge_system USING (true) WITH CHECK (true);--> statement-breakpoint
 CREATE POLICY system_sync ON "memberships" TO rge_system USING (true) WITH CHECK (true);
