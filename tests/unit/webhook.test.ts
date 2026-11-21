@@ -178,7 +178,7 @@ describe("Clerk webhook", () => {
 
   test("organizationMembership.updated changes the role", async () => {
     await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
-    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:owner")));
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:owner", { updated_at: 2 })));
     expect((await snapshot()).memberships[0].role).toBe("owner");
   });
 
@@ -229,7 +229,10 @@ describe("Clerk webhook and removed members", () => {
     await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
     await markRemoved();
     expect((await snapshot()).memberships[0].status).toBe("removed");
-    expect((await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")))).status).toBe(200);
+    // A re-invite is a new Clerk membership event, so its updated_at is newer.
+    expect(
+      (await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter", { updated_at: 2 })))).status,
+    ).toBe(200);
     const s = await snapshot();
     expect(s.memberships).toHaveLength(1);
     expect(s.memberships[0]).toMatchObject({ status: "active", role: "recruiter" });
@@ -238,7 +241,7 @@ describe("Clerk webhook and removed members", () => {
   test("organizationMembership.updated for a removed user reactivates it and applies the new role", async () => {
     await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
     await markRemoved();
-    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:admin")));
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:admin", { updated_at: 2 })));
     expect((await snapshot()).memberships[0]).toMatchObject({ status: "active", role: "admin" });
   });
 
@@ -262,5 +265,72 @@ describe("Clerk webhook and removed members", () => {
   test("organizationMembership.deleted for an unknown member is acknowledged and writes nothing", async () => {
     expect((await POST(signedRequest(membershipEvent("organizationMembership.deleted")))).status).toBe(200);
     expect(await snapshot()).toEqual({ agencies: [], users: [], memberships: [] });
+  });
+});
+
+describe("Clerk webhook ordering (updated_at)", () => {
+  const ms = (n: number) => n * 1000;
+
+  test("an older membership update after a newer one changes neither role nor status", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter", { updated_at: ms(1) })));
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:admin", { updated_at: ms(3) })));
+    const before = await snapshot();
+    expect(before.memberships[0]).toMatchObject({ role: "admin", status: "active" });
+    expect(before.memberships[0].clerkUpdatedAt?.getTime()).toBe(ms(3));
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:owner", { updated_at: ms(2) })));
+    expect(await snapshot()).toEqual(before);
+  });
+
+  test("a newer membership update applies", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter", { updated_at: ms(1) })));
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:owner", { updated_at: ms(2) })));
+    const s = await snapshot();
+    expect(s.memberships[0]).toMatchObject({ role: "owner", status: "active" });
+    expect(s.memberships[0].clerkUpdatedAt?.getTime()).toBe(ms(2));
+  });
+
+  test("a stale update delivered after the deletion does not reactivate the member", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter", { updated_at: ms(1) })));
+    await POST(
+      signedRequest({ ...membershipEvent("organizationMembership.deleted", "org:recruiter", { updated_at: ms(1) }), timestamp: ms(5) }),
+    );
+    expect((await snapshot()).memberships[0]).toMatchObject({ status: "removed" });
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:admin", { updated_at: ms(3) })));
+    expect((await snapshot()).memberships[0]).toMatchObject({ status: "removed", role: "recruiter" });
+    // A real re-invite after the deletion is newer and reactivates.
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:admin", { updated_at: ms(6) })));
+    expect((await snapshot()).memberships[0]).toMatchObject({ status: "active", role: "admin" });
+  });
+
+  test("a deletion soft-removes even when the member was removed in the app, and blocks older updates", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter", { updated_at: ms(1) })));
+    await asOwner(db, (tx) => tx.update(memberships).set({ status: "removed" }));
+    await POST(signedRequest({ ...membershipEvent("organizationMembership.deleted"), timestamp: ms(4) }));
+    expect((await snapshot()).memberships[0].clerkUpdatedAt?.getTime()).toBe(ms(4));
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:owner", { updated_at: ms(2) })));
+    expect((await snapshot()).memberships[0]).toMatchObject({ status: "removed", role: "recruiter" });
+  });
+
+  test("an older organization.updated does not rename the agency; a newer one does", async () => {
+    await POST(signedRequest({ type: "organization.created", object: "event", data: org({ updated_at: ms(1) }) }));
+    await POST(signedRequest({ type: "organization.updated", object: "event", data: org({ name: "Acme Talent", updated_at: ms(3) }) }));
+    await POST(signedRequest({ type: "organization.updated", object: "event", data: org({ name: "Acme Old", updated_at: ms(2) }) }));
+    expect((await snapshot()).agencies[0]).toMatchObject({ name: "Acme Talent" });
+    await POST(signedRequest({ type: "organization.updated", object: "event", data: org({ name: "Acme New", updated_at: ms(4) }) }));
+    expect((await snapshot()).agencies[0]).toMatchObject({ name: "Acme New" });
+  });
+
+  test("an older user.updated does not change the profile; a newer one does", async () => {
+    await POST(signedRequest(userEvent("user.created", { updated_at: ms(1) })));
+    await POST(signedRequest(userEvent("user.updated", { first_name: "Patricia", updated_at: ms(3) })));
+    await POST(signedRequest(userEvent("user.updated", { first_name: "Old", updated_at: ms(2) })));
+    expect((await snapshot()).users[0].name).toBe("Patricia Lee");
+    await POST(signedRequest(userEvent("user.updated", { first_name: "Pat", updated_at: ms(4) })));
+    expect((await snapshot()).users[0].name).toBe("Pat Lee");
+  });
+
+  test("an agency created by a Clerk event is disabled", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created")));
+    expect((await snapshot()).agencies[0].enabled).toBe(false);
   });
 });
