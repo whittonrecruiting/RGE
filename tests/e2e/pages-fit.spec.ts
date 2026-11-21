@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { FITS, overflowReport } from "./fit";
 
 // Signed-in layout check of the real pages. It needs a seeded test owner, a Clerk testing token and an
 // MPC with 40 facts and a 90 character firm name restriction, so it runs in the deploy task, not locally.
@@ -26,8 +27,7 @@ for (const vp of viewports) {
       const button = page.getByRole("button", { name: primary }).or(page.getByRole("link", { name: primary })).first();
       await button.scrollIntoViewIfNeeded();
       await expect(button).toBeVisible();
-      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-      expect(overflow).toBe(false);
+      expect(await overflowReport(page)).toEqual(FITS);
     });
   }
 }

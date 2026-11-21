@@ -58,7 +58,6 @@ body {
   background: var(--c-bg);
   color: var(--c-text);
   font-family: var(--font-sans);
-  overflow-x: hidden;
 }
 
 /* Theme-aware logo swap: both images render, CSS shows the right one. */

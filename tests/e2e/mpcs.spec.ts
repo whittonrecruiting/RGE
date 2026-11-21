@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { FITS, overflowReport } from "./fit";
 
 // Runs against /dev/mpcs, which renders the MPC screens with made-up data and no auth (404 in production).
 for (const vp of [
@@ -12,8 +13,7 @@ for (const vp of [
       await page.setViewportSize({ width: vp.w, height: vp.h });
       await page.goto(view ? `/dev/mpcs?view=${view}` : "/dev/mpcs");
       await expect(page.getByRole("main")).toBeVisible();
-      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-      expect(overflow).toBe(false);
+      expect(await overflowReport(page)).toEqual(FITS);
     });
   }
 }

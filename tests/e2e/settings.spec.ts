@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { FITS, overflowReport } from "./fit";
 
 // Runs against /dev/settings, which renders the settings page with made-up data and no auth (404 in production).
 for (const vp of [
@@ -12,8 +13,7 @@ for (const vp of [
     const save = page.getByRole("button", { name: "Save settings" });
     await save.scrollIntoViewIfNeeded();
     await expect(save).toBeVisible();
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-    expect(overflow).toBe(false);
+    expect(await overflowReport(page)).toEqual(FITS);
   });
 
   test(`read-only mode has no horizontal scroll and no Save on ${vp.name}`, async ({ page }) => {
@@ -22,8 +22,7 @@ for (const vp of [
     await expect(page.getByText("Only the Owner and Admins can change settings.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Save settings" })).toHaveCount(0);
     await expect(page.getByLabel("Time zone")).toBeDisabled();
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
-    expect(overflow).toBe(false);
+    expect(await overflowReport(page)).toEqual(FITS);
   });
 }
 

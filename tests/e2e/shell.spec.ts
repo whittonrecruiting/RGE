@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { FITS, overflowReport } from "./fit";
 
 // Runs against /dev/shell, a route that renders AppShell without auth (404 in production).
 for (const vp of [
@@ -11,10 +12,7 @@ for (const vp of [
     await expect(page.getByRole("navigation")).toBeVisible();
     await expect(page.getByRole("link", { name: "Approvals" })).toBeVisible();
     await expect(page.getByRole("link", { name: "MPCs" })).toBeVisible();
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth,
-    );
-    expect(overflow).toBe(false);
+    expect(await overflowReport(page)).toEqual(FITS);
   });
 }
 
