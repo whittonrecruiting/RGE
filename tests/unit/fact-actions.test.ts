@@ -85,22 +85,51 @@ describe("confirmFact", () => {
 });
 
 describe("updateFact", () => {
-  test("an edited usable fact stays usable with its source", async () => {
-    const x = await fact("usable", { sourceKind: "resume", sourceRef: "cv.pdf" });
-    const r = await asMember(f.recA, () => updateFact(x.id, "  Tried 12 jury trials  "));
-    expect(r.ok).toBe(true);
-    const after = await getFact(db, x.id);
-    expect(after).toMatchObject({ text: "Tried 12 jury trials", status: "usable", sourceKind: "resume", sourceRef: "cv.pdf" });
+  const QUOTE = "Tried twelve jury trials to verdict in state court";
+  for (const sourceKind of ["resume", "notes", "transcript", "web"] as const) {
+    for (const status of ["usable", "confirmed"] as const) {
+      test(`editing a ${status} ${sourceKind} fact makes it a confirmed manual fact edited by the caller`, async () => {
+        const x = await fact(status, { sourceKind, sourceRef: sourceKind === "web" ? "https://example.test/a" : "cv.pdf", sourceQuote: QUOTE });
+        const r = await asMember(f.recA, () => updateFact(x.id, "  Tried 12 jury trials  "));
+        expect(r.ok).toBe(true);
+        const after = await getFact(db, x.id);
+        expect(after).toMatchObject({
+          text: "Tried 12 jury trials",
+          sourceKind: "manual",
+          status: "confirmed",
+          sourceQuote: null,
+          sourceRef: null,
+          editedBy: f.recA.userId,
+          confirmedBy: f.recA.userId,
+        });
+        expect(after.editedAt).toBeInstanceOf(Date);
+      });
+    }
+  }
+  test("editing a manual fact keeps it manual and confirmed and records the edit", async () => {
+    await asMember(f.recA, () => addManualFact(mpcId, "Speaks Spanish"));
+    const [row] = await factsOf(f.recA);
+    expect(row.editedAt).toBeNull();
+    await asMember(f.admin, () => updateFact(row.id, "Speaks Spanish and Portuguese"));
+    const after = await getFact(db, row.id);
+    expect(after).toMatchObject({ text: "Speaks Spanish and Portuguese", sourceKind: "manual", status: "confirmed", editedBy: f.admin.userId });
+    expect(after.editedAt).toBeInstanceOf(Date);
+    expect((await factsOf(f.recA))[0].editedAt).toBeInstanceOf(Date);
   });
-  test("an edited interview-only fact stays interview-only", async () => {
-    const x = await fact("interview_only");
+  test("an edited interview-only fact stays interview-only with its source and records the edit", async () => {
+    const x = await fact("interview_only", { sourceKind: "transcript", sourceRef: "call.txt", sourceQuote: QUOTE });
     await asMember(f.recA, () => updateFact(x.id, "Prefers Denver"));
-    expect((await getFact(db, x.id)).status).toBe("interview_only");
-  });
-  test("an edited confirmed fact stays confirmed", async () => {
-    const x = await fact("confirmed");
-    await asMember(f.recA, () => updateFact(x.id, "Led a team of five"));
-    expect((await getFact(db, x.id)).status).toBe("confirmed");
+    const after = await getFact(db, x.id);
+    expect(after).toMatchObject({
+      text: "Prefers Denver",
+      status: "interview_only",
+      sourceKind: "transcript",
+      sourceRef: "call.txt",
+      sourceQuote: QUOTE,
+      editedBy: f.recA.userId,
+      confirmedBy: null,
+    });
+    expect(after.editedAt).toBeInstanceOf(Date);
   });
   test("rejects empty, long and em dash text", async () => {
     const x = await fact("usable");

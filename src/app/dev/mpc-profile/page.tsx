@@ -24,6 +24,7 @@ const facts: FactItem[] = Array.from({ length: 40 }, (_, i) => {
     sourceRef:
       sourceKind === "web" ? (i % 2 === 0 ? LONG_URL : "http://insecure.example.com/page") : sourceKind === "manual" ? null : "jordan-example-resume-with-a-very-long-file-name-2026.pdf",
     status: STATUSES[i % STATUSES.length],
+    edited: i % 4 === 0,
   };
 });
 

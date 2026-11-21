@@ -6,6 +6,7 @@ import { mpcCredentials, mpcFacts, mpcRestrictions, mpcs } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { requireMember, type Member } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { cleanFactText } from "./fact-text";
 import { isUuid } from "./queries";
 
 export type FactActionResult = { ok: true } | { ok: false; error: string };
@@ -15,18 +16,8 @@ export type CredentialInput = { kind: string; region: string; verified: boolean 
 const NOT_FOUND = "MPC not found.";
 const FACT_NOT_FOUND = "Fact not found.";
 const NOT_YOURS = "You can only edit your own MPCs.";
-const EM_DASH = String.fromCharCode(0x2014);
 const KINDS = ["never_say", "confidential", "excluded_company", "region_exclusion"] as const;
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
-
-function cleanFactText(raw: unknown): { ok: true; text: string } | { ok: false; error: string } {
-  if (typeof raw !== "string") return fail("Enter the fact.");
-  const text = raw.trim();
-  if (text === "") return fail("Enter the fact.");
-  if (text.length > 300) return fail("Keep the fact to 300 characters or fewer.");
-  if (text.includes(EM_DASH)) return fail("Remove em dashes from this fact.");
-  return { ok: true, text };
-}
 
 /** Looks up the MPC owner and checks the member may edit it. */
 async function authorizeMpc(member: Member, mpcId: string): Promise<FactActionResult> {
@@ -39,7 +30,12 @@ async function authorizeMpc(member: Member, mpcId: string): Promise<FactActionRe
 }
 
 type FactAuth =
-  | { ok: true; mpcId: string; status: "usable" | "interview_only" | "confirmed" }
+  | {
+      ok: true;
+      mpcId: string;
+      status: "usable" | "interview_only" | "confirmed";
+      sourceKind: "resume" | "notes" | "transcript" | "web" | "manual";
+    }
   | { ok: false; error: string };
 
 /** Finds a fact and checks the member may edit its MPC. */
@@ -47,14 +43,14 @@ async function authorizeFact(member: Member, factId: string): Promise<FactAuth> 
   if (!isUuid(factId)) return fail(FACT_NOT_FOUND);
   const [row] = await withAgency(member.agencyId, (tx) =>
     tx
-      .select({ mpcId: mpcFacts.mpcId, status: mpcFacts.status, ownerUserId: mpcs.ownerUserId })
+      .select({ mpcId: mpcFacts.mpcId, status: mpcFacts.status, sourceKind: mpcFacts.sourceKind, ownerUserId: mpcs.ownerUserId })
       .from(mpcFacts)
       .innerJoin(mpcs, eq(mpcs.id, mpcFacts.mpcId))
       .where(eq(mpcFacts.id, factId)),
   );
   if (!row) return fail(FACT_NOT_FOUND);
   if (!can(member, "mpc.edit", { ownerUserId: row.ownerUserId })) return fail(NOT_YOURS);
-  return { ok: true, mpcId: row.mpcId, status: row.status };
+  return { ok: true, mpcId: row.mpcId, status: row.status, sourceKind: row.sourceKind };
 }
 
 function refresh(mpcId: string) {
@@ -79,15 +75,39 @@ export async function confirmFact(factId: string): Promise<FactActionResult> {
   return { ok: true };
 }
 
-/** Changes the wording only. Status and source stay as they were. */
+/**
+ * Changes the wording and records who edited it. A usable or confirmed fact from a resume, notes,
+ * a transcript or the web no longer matches its quote once reworded, so it becomes a manual fact
+ * confirmed by the editor (source and quote cleared). A manual fact stays manual and confirmed. An
+ * interview-only fact keeps its status and source: it still needs a confirm before any pitch.
+ */
 export async function updateFact(factId: string, text: string): Promise<FactActionResult> {
   const member = await requireMember();
   const auth = await authorizeFact(member, factId);
   if (!auth.ok) return auth;
   const clean = cleanFactText(text);
   if (!clean.ok) return clean;
+  const now = new Date();
+  const edit = { text: clean.text, editedBy: member.userId, editedAt: now, updatedAt: now };
+  const converts = auth.status !== "interview_only" && auth.sourceKind !== "manual";
   await withAgency(member.agencyId, (tx) =>
-    tx.update(mpcFacts).set({ text: clean.text, updatedAt: new Date() }).where(eq(mpcFacts.id, factId)),
+    tx
+      .update(mpcFacts)
+      .set(
+        converts
+          ? {
+              ...edit,
+              sourceKind: "manual",
+              status: "confirmed",
+              sourceQuote: null,
+              sourceRef: null,
+              sourceDocumentId: null,
+              confirmedBy: member.userId,
+              confirmedAt: now,
+            }
+          : edit,
+      )
+      .where(eq(mpcFacts.id, factId)),
   );
   refresh(auth.mpcId);
   return { ok: true };

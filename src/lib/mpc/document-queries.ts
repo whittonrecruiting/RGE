@@ -57,6 +57,8 @@ export type FactRow = {
   sourceRef: string | null;
   sourceQuote: string | null;
   status: "usable" | "interview_only" | "confirmed";
+  /** Set when the wording was changed by hand. */
+  editedAt: Date | null;
   createdAt: Date;
 };
 
@@ -72,6 +74,7 @@ export async function listFacts(member: Member, mpcId: string): Promise<FactRow[
         sourceRef: mpcFacts.sourceRef,
         sourceQuote: mpcFacts.sourceQuote,
         status: mpcFacts.status,
+        editedAt: mpcFacts.editedAt,
         createdAt: mpcFacts.createdAt,
       })
       .from(mpcFacts)

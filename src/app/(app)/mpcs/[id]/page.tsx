@@ -46,6 +46,7 @@ export default async function MpcPage({ params }: Props) {
     sourceKind: f.sourceKind,
     sourceRef: f.sourceRef,
     status: f.status,
+    edited: f.editedAt !== null,
   }));
   const latestConsent = consents[0]
     ? {

@@ -10,6 +10,8 @@ export type FactItem = {
   sourceKind: "resume" | "notes" | "transcript" | "web" | "manual";
   sourceRef: string | null;
   status: "usable" | "interview_only" | "confirmed";
+  /** The wording was changed by hand. */
+  edited?: boolean;
 };
 
 const KIND_LABEL: Record<FactItem["sourceKind"], string> = {
@@ -30,7 +32,7 @@ const isHttps = (v: string | null): v is string => {
 };
 
 function Source({ fact }: { fact: FactItem }) {
-  if (fact.sourceKind === "manual") return <span>Source: Added by hand</span>;
+  if (fact.sourceKind === "manual") return <span>Source: {fact.edited ? "Edited by hand" : "Added by hand"}</span>;
   if (fact.sourceKind === "web") {
     return isHttps(fact.sourceRef) ? (
       <span className="min-w-0 [overflow-wrap:anywhere]">
@@ -103,6 +105,7 @@ function FactRow({ fact, canEdit }: { fact: FactItem; canEdit: boolean }) {
       )}
       <span className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted">
         <Source fact={fact} />
+        {fact.edited && fact.sourceKind !== "manual" && <span>Edited by hand</span>}
         {fact.status === "confirmed" && <span>Confirmed</span>}
       </span>
       {canEdit && !editing && (

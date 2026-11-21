@@ -54,3 +54,9 @@ test("only https web sources are links", async ({ page }) => {
   expect(hrefs.length).toBeGreaterThan(0);
   expect(hrefs.every((h) => h.startsWith("https://"))).toBe(true);
 });
+
+test("facts changed by hand are labelled", async ({ page }) => {
+  await page.goto("/dev/mpc-profile");
+  await expect(page.getByText("Source: Edited by hand").first()).toBeVisible();
+  await expect(page.getByText("Source: Added by hand").first()).toBeVisible();
+});

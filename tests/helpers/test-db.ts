@@ -84,6 +84,7 @@ export type SeedFactOptions = {
   text?: string;
   sourceKind?: "resume" | "notes" | "transcript" | "web" | "manual";
   sourceRef?: string | null;
+  sourceQuote?: string | null;
 };
 
 /** Inserts one fact, bypassing row-level security. Test setup only. */
@@ -97,6 +98,7 @@ export async function seedFact(db: TestDb, opts: SeedFactOptions): Promise<{ id:
         text: opts.text ?? `Fact ${randomUUID().slice(0, 8)}`,
         sourceKind: opts.sourceKind ?? "notes",
         sourceRef: opts.sourceRef ?? null,
+        sourceQuote: opts.sourceQuote ?? null,
         status: opts.status ?? "usable",
       })
       .returning({ id: schema.mpcFacts.id });
