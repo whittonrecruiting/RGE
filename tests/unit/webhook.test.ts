@@ -189,16 +189,14 @@ describe("Clerk webhook", () => {
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("org:member"));
   });
 
-  test("organizationMembership.deleted and organization.deleted keep our rows and log", async () => {
+  test("organization.deleted keeps our rows and logs", async () => {
     await POST(signedRequest(membershipEvent("organizationMembership.created")));
     const before = await snapshot();
-    expect((await POST(signedRequest(membershipEvent("organizationMembership.deleted")))).status).toBe(200);
     expect(
       (await POST(signedRequest({ type: "organization.deleted", object: "event", data: { object: "organization", id: "org_abc", deleted: true } }))).status,
     ).toBe(200);
     expect(await snapshot()).toEqual(before);
     expect(console.info).toHaveBeenCalledWith(expect.stringContaining("organization.deleted"));
-    expect(console.info).toHaveBeenCalledWith(expect.stringContaining("organizationMembership.deleted"));
   });
 
   test("unhandled event types are acknowledged and ignored", async () => {
@@ -249,5 +247,20 @@ describe("Clerk webhook and removed members", () => {
     const before = await snapshot();
     await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
     expect(await snapshot()).toEqual(before);
+  });
+
+  test("organizationMembership.deleted soft-removes the membership; replays change nothing", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
+    expect((await POST(signedRequest(membershipEvent("organizationMembership.deleted")))).status).toBe(200);
+    const once = await snapshot();
+    expect(once.memberships).toHaveLength(1);
+    expect(once.memberships[0].status).toBe("removed");
+    expect((await POST(signedRequest(membershipEvent("organizationMembership.deleted")))).status).toBe(200);
+    expect(await snapshot()).toEqual(once);
+  });
+
+  test("organizationMembership.deleted for an unknown member is acknowledged and writes nothing", async () => {
+    expect((await POST(signedRequest(membershipEvent("organizationMembership.deleted")))).status).toBe(200);
+    expect(await snapshot()).toEqual({ agencies: [], users: [], memberships: [] });
   });
 });

@@ -3,10 +3,28 @@ import { and, eq } from "drizzle-orm";
 import { agencies, memberships, mpcs, users } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { inviteMember, removeMember, setMemberRole } from "@/lib/team/actions";
-import { setTeamClerk, type TeamClerk } from "@/lib/team/clerk-client";
+import { revalidatePath } from "next/cache";
+import { ClerkNotFoundError, setTeamClerk, type TeamClerk } from "@/lib/team/clerk-client";
 import { requireMember, setAuthReader, type Member } from "@/lib/auth";
 import { asOwner, createTestDb, type TestDb } from "../helpers/test-db";
 import { asMember, seedMembers, type MemberFixtures } from "../helpers/as-member";
+
+// Wraps withAgency so a test can make the next local transaction fail (after Clerk succeeded).
+const gate = vi.hoisted(() => ({ failNext: false }));
+vi.mock("@/db/with-agency", async (orig) => {
+  const actual = await orig<typeof import("@/db/with-agency")>();
+  return {
+    ...actual,
+    withAgency: (...args: Parameters<typeof actual.withAgency>) => {
+      if (gate.failNext) {
+        gate.failNext = false;
+        return Promise.reject(new Error("simulated database failure"));
+      }
+      return actual.withAgency(...args);
+    },
+  };
+});
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 let db: TestDb;
 let close: (() => Promise<void>) | undefined;
@@ -24,8 +42,12 @@ beforeEach(async () => {
     updateMembershipRole: vi.fn(async () => {}),
   };
   setTeamClerk(clerk as unknown as TeamClerk);
+  gate.failNext = false;
+  vi.mocked(revalidatePath).mockClear();
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   setTeamClerk(undefined);
   setAuthReader(undefined);
   await close?.();
@@ -137,7 +159,79 @@ describe("setMemberRole", () => {
   });
 });
 
+describe("revalidation", () => {
+  test("every successful mutation revalidates /team; failures do not", async () => {
+    await inviteMemberAs(f.owner, "new@example.test", "recruiter");
+    await setMemberRoleAs(f.owner, await membershipId(f.recA.userId), "admin");
+    await removeMemberAs(f.owner, await membershipId(f.recB.userId));
+    expect(revalidatePath).toHaveBeenCalledTimes(3);
+    expect(revalidatePath).toHaveBeenCalledWith("/team");
+    vi.mocked(revalidatePath).mockClear();
+    await inviteMemberAs(f.recA, "x@example.test", "recruiter");
+    await setMemberRoleAs(f.admin, await membershipId(f.owner.userId), "admin");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("local failure after Clerk succeeded", () => {
+  test("setMemberRole returns an inline error instead of throwing", async () => {
+    clerk.updateMembershipRole.mockImplementationOnce(async () => {
+      gate.failNext = true;
+    });
+    const r = await setMemberRoleAs(f.owner, await membershipId(f.recA.userId), "admin");
+    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ error: expect.stringContaining("Try again") });
+    expect((await rowOf(f.recA.userId)).role).toBe("recruiter");
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  test("removeMember returns an inline error, and a retry (Clerk not found) completes the removal", async () => {
+    await asOwner(db, (tx) =>
+      tx
+        .insert(mpcs)
+        .values({ agencyId: f.agency.id, ownerUserId: f.recA.userId, headlineRole: "Role A", location: "Phoenix" }),
+    );
+    const id = await membershipId(f.recA.userId);
+    clerk.removeFromOrganization.mockImplementationOnce(async () => {
+      gate.failNext = true;
+    });
+    const first = await removeMemberAs(f.owner, id);
+    expect(first).toEqual({
+      ok: false,
+      error: "The member was removed from sign-in but RGE could not finish. Try again.",
+    });
+    expect((await rowOf(f.recA.userId)).status).toBe("active");
+    const [still] = await withAgency(f.agency.id, (tx) => tx.select().from(mpcs));
+    expect(still.ownerUserId).toBe(f.recA.userId);
+    expect(revalidatePath).not.toHaveBeenCalled();
+
+    clerk.removeFromOrganization.mockRejectedValueOnce(new ClerkNotFoundError("gone"));
+    expect(await removeMemberAs(f.owner, id)).toEqual({ ok: true });
+    expect((await rowOf(f.recA.userId)).status).toBe("removed");
+    const [moved] = await withAgency(f.agency.id, (tx) => tx.select().from(mpcs));
+    expect(moved.ownerUserId).toBe(f.owner.userId);
+    expect(revalidatePath).toHaveBeenCalledWith("/team");
+  });
+
+  test("a Clerk error other than not-found still fails without touching local state", async () => {
+    clerk.removeFromOrganization.mockRejectedValueOnce(new Error("boom"));
+    const r = await removeMemberAs(f.owner, await membershipId(f.recA.userId));
+    expect(r.ok).toBe(false);
+    expect((await rowOf(f.recA.userId)).status).toBe("active");
+  });
+});
+
 describe("removeMember", () => {
+  test("with no active Owner it errors, changes nothing and does not call Clerk", async () => {
+    await asOwner(db, (tx) =>
+      tx.update(memberships).set({ status: "removed" }).where(eq(memberships.userId, f.owner.userId)),
+    );
+    const r = await removeMemberAs(f.admin, await membershipId(f.recA.userId));
+    expect(r.ok).toBe(false);
+    expect(clerk.removeFromOrganization).not.toHaveBeenCalled();
+    expect((await rowOf(f.recA.userId)).status).toBe("active");
+  });
+
   test("admin cannot remove owner", async () => {
     const r = await removeMemberAs(f.admin, await membershipId(f.owner.userId));
     expect(r).toEqual(OWNER_ONLY);

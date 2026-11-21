@@ -107,6 +107,19 @@ async function syncMembership(tx: Tx, data: ClerkMembership): Promise<void> {
     });
 }
 
+async function removeMembership(tx: Tx, data: ClerkMembership): Promise<void> {
+  const clerkOrgId = data.organization?.id;
+  const clerkUserId = data.public_user_data?.user_id;
+  if (!clerkOrgId || !clerkUserId) return;
+  const [agency] = await tx.select({ id: agencies.id }).from(agencies).where(sql`${agencies.clerkOrgId} = ${clerkOrgId}`);
+  const [user] = await tx.select({ id: users.id }).from(users).where(sql`${users.clerkUserId} = ${clerkUserId}`);
+  if (!agency || !user) return;
+  await tx
+    .update(memberships)
+    .set({ status: "removed", updatedAt: sql`now()` })
+    .where(sql`${memberships.agencyId} = ${agency.id} and ${memberships.userId} = ${user.id} and ${memberships.status} <> 'removed'`);
+}
+
 /** Applies one verified Clerk event to agencies, users and memberships. Idempotent. */
 export async function applyClerkEvent(event: ClerkEvent): Promise<void> {
   switch (event.type) {
@@ -126,15 +139,11 @@ export async function applyClerkEvent(event: ClerkEvent): Promise<void> {
     case "organizationMembership.updated":
       await withSystem((tx) => syncMembership(tx, event.data as ClerkMembership));
       return;
-    case "organizationMembership.deleted": {
-      // Removal is soft and is performed by our own removeMember action (which sets status
-      // 'removed' itself), so the row is kept here.
-      const m = event.data as ClerkMembership;
-      console.info(
-        `Clerk organizationMembership.deleted for ${m.public_user_data?.user_id} in ${m.organization?.id}: membership kept.`,
-      );
+    case "organizationMembership.deleted":
+      // Soft removal, same as the removeMember action. MPC reassignment stays in that action:
+      // rge_system has no access to mpcs. Replays are harmless (the status is already removed).
+      await withSystem((tx) => removeMembership(tx, event.data as ClerkMembership));
       return;
-    }
     default:
       return;
   }

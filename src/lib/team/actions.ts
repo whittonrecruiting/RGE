@@ -1,11 +1,12 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { agencies, memberships, mpcs, users } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { requireMember, type Member, type Role } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { getTeamClerk } from "./clerk-client";
+import { ClerkNotFoundError, getTeamClerk } from "./clerk-client";
 
 export type TeamResult = { ok: true } | { ok: false; error: string };
 
@@ -13,6 +14,9 @@ const NO_PERMISSION = "You do not have permission to manage the team.";
 const OWNER_ONLY = "Only the Owner can change the Owner.";
 const NOT_FOUND = "Member not found.";
 const CLERK_FAILED = "Clerk could not complete that. Nothing was changed. Try again.";
+
+const LOCAL_FAILED = "The change was made in sign-in but RGE could not finish. Try again.";
+const REMOVE_LOCAL_FAILED = "The member was removed from sign-in but RGE could not finish. Try again.";
 
 const fail = (error: string): TeamResult => ({ ok: false, error });
 
@@ -63,6 +67,7 @@ export async function inviteMember(email: string, role: Role): Promise<TeamResul
     console.error("inviteMember: Clerk call failed", err);
     return fail(CLERK_FAILED);
   }
+  revalidatePath("/team");
   return { ok: true };
 }
 
@@ -86,9 +91,16 @@ export async function setMemberRole(membershipId: string, role: Role): Promise<T
     return fail(CLERK_FAILED);
   }
   // Mirror Clerk now so the page is immediately right; the webhook would sync the same value.
-  await withAgency(member.agencyId, (tx) =>
-    tx.update(memberships).set({ role, updatedAt: new Date() }).where(eq(memberships.id, target.id)),
-  );
+  try {
+    await withAgency(member.agencyId, (tx) =>
+      tx.update(memberships).set({ role, updatedAt: new Date() }).where(eq(memberships.id, target.id)),
+    );
+  } catch (err) {
+    // The organizationMembership.updated webhook will also reconcile our copy.
+    console.error("setMemberRole: local update failed after Clerk succeeded", err);
+    return fail(LOCAL_FAILED);
+  }
+  revalidatePath("/team");
   return { ok: true };
 }
 
@@ -117,18 +129,28 @@ export async function removeMember(membershipId: string): Promise<TeamResult> {
       clerkUserId: target.clerkUserId,
     });
   } catch (err) {
-    console.error("removeMember: Clerk call failed", err);
-    return fail(CLERK_FAILED);
+    // Already gone in Clerk (an earlier attempt, or the webhook): carry on so the local step completes.
+    if (!(err instanceof ClerkNotFoundError)) {
+      console.error("removeMember: Clerk call failed", err);
+      return fail(CLERK_FAILED);
+    }
   }
-  await withAgency(member.agencyId, async (tx) => {
-    await tx
-      .update(memberships)
-      .set({ status: "removed", updatedAt: new Date() })
-      .where(eq(memberships.id, target.id));
-    await tx
-      .update(mpcs)
-      .set({ ownerUserId: owner.userId, updatedAt: new Date() })
-      .where(and(eq(mpcs.agencyId, member.agencyId), eq(mpcs.ownerUserId, target.userId)));
-  });
+  try {
+    await withAgency(member.agencyId, async (tx) => {
+      await tx
+        .update(memberships)
+        .set({ status: "removed", updatedAt: new Date() })
+        .where(eq(memberships.id, target.id));
+      await tx
+        .update(mpcs)
+        .set({ ownerUserId: owner.userId, updatedAt: new Date() })
+        .where(and(eq(mpcs.agencyId, member.agencyId), eq(mpcs.ownerUserId, target.userId)));
+    });
+  } catch (err) {
+    // The transaction rolled back as a whole; a retry finishes it (Clerk not-found counts as success).
+    console.error("removeMember: local step failed after Clerk succeeded", err);
+    return fail(REMOVE_LOCAL_FAILED);
+  }
+  revalidatePath("/team");
   return { ok: true };
 }

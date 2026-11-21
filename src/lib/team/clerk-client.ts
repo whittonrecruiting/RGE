@@ -8,6 +8,9 @@ export interface TeamClerk {
   updateMembershipRole(args: { orgId: string; clerkUserId: string; role: Role }): Promise<void>;
 }
 
+/** removeFromOrganization throws this when the membership is already gone in Clerk. */
+export class ClerkNotFoundError extends Error {}
+
 // Inverse of mapClerkRole in src/lib/auth.ts.
 const CLERK_ROLE_KEY: Record<Role, string> = {
   owner: "org:owner",
@@ -33,7 +36,12 @@ const realClerk: TeamClerk = {
   },
   async removeFromOrganization({ orgId, clerkUserId }) {
     const orgs = await organizationsApi();
-    await orgs.deleteOrganizationMembership({ organizationId: orgId, userId: clerkUserId });
+    try {
+      await orgs.deleteOrganizationMembership({ organizationId: orgId, userId: clerkUserId });
+    } catch (err) {
+      if ((err as { status?: number }).status === 404) throw new ClerkNotFoundError("Membership not found in Clerk");
+      throw err;
+    }
   },
   async updateMembershipRole({ orgId, clerkUserId, role }) {
     const orgs = await organizationsApi();
