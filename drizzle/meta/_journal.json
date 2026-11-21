@@ -36,6 +36,20 @@
       "when": 1795295796607,
       "tag": "0004_rls_system",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795296456699,
+      "tag": "0005_membership_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795296459070,
+      "tag": "0006_rls_membership_removal",
+      "breakpoints": true
     }
   ]
 }

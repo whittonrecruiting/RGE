@@ -55,7 +55,8 @@ export function runAsMember<T>(member: Member, fn: () => Promise<T>): Promise<T>
 
 /**
  * The signed-in member of the active agency. Redirects to /sign-in when signed out and to
- * /no-agency when there is no active organization or it does not map to a synced membership.
+ * /no-agency when there is no active organization or it does not map to an active, synced
+ * membership (a removed member counts as none).
  *
  * The lookup runs as rge_system because no agency context exists yet; it only reads
  * agencies, users and memberships. Callers then use withAgency(member.agencyId, ...).
@@ -75,10 +76,10 @@ export async function requireMember(): Promise<Member> {
       .from(memberships)
       .innerJoin(users, eq(users.id, memberships.userId))
       .innerJoin(agencies, eq(agencies.id, memberships.agencyId))
-      .where(and(eq(users.clerkUserId, userId), eq(agencies.clerkOrgId, orgId)))
+      .where(and(eq(users.clerkUserId, userId), eq(agencies.clerkOrgId, orgId), eq(memberships.status, "active")))
       .limit(1),
   );
-  // Not a member, or the Clerk webhook has not synced the membership yet.
+  // Not a member, removed, or the Clerk webhook has not synced the membership yet.
   if (!row) redirect("/no-agency");
   return row;
 }

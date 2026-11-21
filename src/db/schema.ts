@@ -37,6 +37,7 @@ const sameAgencyMember = (t: AgencyRow, col: AnyPgColumn, name: string) =>
   foreignKey({ name, columns: [t.agencyId, col], foreignColumns: [memberships.agencyId, memberships.userId] });
 
 export const membershipRole = pgEnum("membership_role", ["owner", "admin", "recruiter"]);
+export const membershipStatus = pgEnum("membership_status", ["active", "removed"]);
 export const mpcStatus = pgEnum("mpc_status", ["active", "paused", "removed", "placed"]);
 export const workMode = pgEnum("work_mode", ["onsite", "hybrid", "remote", "any"]);
 export const employerType = pgEnum("employer_type", ["inhouse", "firm", "either"]);
@@ -77,6 +78,8 @@ export const memberships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: membershipRole("role").notNull(),
+    // Removal is soft: the row stays so MPCs, consents and facts keep their member references.
+    status: membershipStatus("status").notNull().default("active"),
     ...timestamps,
   },
   (t) => [unique("memberships_agency_user_unique").on(t.agencyId, t.userId)],

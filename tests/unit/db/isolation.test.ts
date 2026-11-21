@@ -119,7 +119,7 @@ describe("agency isolation (row-level security)", () => {
     const rlsMigrations = readdirSync(dir)
       .filter((f) => /^\d{4}_rls.*\.sql$/.test(f))
       .sort();
-    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql", "0004_rls_system.sql"]);
+    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql", "0004_rls_system.sql", "0006_rls_membership_removal.sql"]);
     const combined = rlsMigrations.map((f) => normalize(readFileSync(join(dir, f), "utf8"))).join("\n\n");
     expect(combined).toBe(normalize(readFileSync(join(process.cwd(), "src/db/rls.sql"), "utf8")));
   });

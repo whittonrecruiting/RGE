@@ -221,3 +221,33 @@ describe("Clerk webhook", () => {
     expect((await failing(new Request("http://localhost/x", { method: "POST", body: "{}" }))).status).toBe(401);
   });
 });
+
+describe("Clerk webhook and removed members", () => {
+  async function markRemoved() {
+    await asOwner(db, (tx) => tx.update(memberships).set({ status: "removed" }));
+  }
+
+  test("organizationMembership.created for a previously removed user reactivates the membership", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
+    await markRemoved();
+    expect((await snapshot()).memberships[0].status).toBe("removed");
+    expect((await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")))).status).toBe(200);
+    const s = await snapshot();
+    expect(s.memberships).toHaveLength(1);
+    expect(s.memberships[0]).toMatchObject({ status: "active", role: "recruiter" });
+  });
+
+  test("organizationMembership.updated for a removed user reactivates it and applies the new role", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
+    await markRemoved();
+    await POST(signedRequest(membershipEvent("organizationMembership.updated", "org:admin")));
+    expect((await snapshot()).memberships[0]).toMatchObject({ status: "active", role: "admin" });
+  });
+
+  test("replaying an event for an active member changes nothing", async () => {
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
+    const before = await snapshot();
+    await POST(signedRequest(membershipEvent("organizationMembership.created", "org:recruiter")));
+    expect(await snapshot()).toEqual(before);
+  });
+});

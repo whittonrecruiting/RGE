@@ -93,3 +93,9 @@ GRANT SELECT, INSERT, UPDATE ON "agencies", "users", "memberships" TO rge_system
 CREATE POLICY system_sync ON "agencies" TO rge_system USING (true) WITH CHECK (true);--> statement-breakpoint
 CREATE POLICY system_sync ON "users" TO rge_system USING (true) WITH CHECK (true);--> statement-breakpoint
 CREATE POLICY system_sync ON "memberships" TO rge_system USING (true) WITH CHECK (true);
+
+-- Team removal is soft (memberships.status = 'removed'). The app can no longer delete membership
+-- rows, so a removed member's references from MPCs, consents and facts stay intact, and it can
+-- update the status (alongside the role) of memberships in its own agency.
+REVOKE DELETE ON "memberships" FROM rge_app;--> statement-breakpoint
+GRANT UPDATE ("status") ON "memberships" TO rge_app;

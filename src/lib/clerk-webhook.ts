@@ -98,11 +98,12 @@ async function syncMembership(tx: Tx, data: ClerkMembership): Promise<void> {
   const userId = await userIdOf(tx, p.user_id);
   await tx
     .insert(memberships)
-    .values({ agencyId, userId, role: mapClerkRole(data.role) })
+    .values({ agencyId, userId, role: mapClerkRole(data.role), status: "active" })
     .onConflictDoUpdate({
       target: [memberships.agencyId, memberships.userId],
-      set: { role: sql`excluded.role`, updatedAt: sql`now()` },
-      setWhere: sql`${memberships.role} is distinct from excluded.role`,
+      // A created/updated event for a removed member means they were re-invited: reactivate.
+      set: { role: sql`excluded.role`, status: sql`excluded.status`, updatedAt: sql`now()` },
+      setWhere: sql`(${memberships.role}, ${memberships.status}) is distinct from (excluded.role, excluded.status)`,
     });
 }
 
@@ -126,7 +127,8 @@ export async function applyClerkEvent(event: ClerkEvent): Promise<void> {
       await withSystem((tx) => syncMembership(tx, event.data as ClerkMembership));
       return;
     case "organizationMembership.deleted": {
-      // A later task adds a removed status; until then the membership row is kept.
+      // Removal is soft and is performed by our own removeMember action (which sets status
+      // 'removed' itself), so the row is kept here.
       const m = event.data as ClerkMembership;
       console.info(
         `Clerk organizationMembership.deleted for ${m.public_user_data?.user_id} in ${m.organization?.id}: membership kept.`,
