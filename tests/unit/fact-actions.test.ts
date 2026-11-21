@@ -216,4 +216,19 @@ describe("recordConsent", () => {
     expect((await asMember(f.recA, () => recordConsent(mpcId, { givenOn: "2026-11-20", method: "verbal", proofFile: big }))).ok).toBe(false);
     expect(await asMember(f.recA, () => listConsents(f.recA, mpcId))).toHaveLength(1);
   });
+  test("proof type comes from extension and bytes, not the client type", async () => {
+    const rec = (file: File) => asMember(f.recA, () => recordConsent(mpcId, { givenOn: "2026-11-20", method: "verbal", proofFile: file }));
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
+    expect((await rec(new File([png], "x.exe", { type: "image/png" }))).ok).toBe(false);
+    expect((await rec(new File(["%PDF-1.4"], "x.png", { type: "image/png" }))).ok).toBe(false);
+    expect((await rec(new File([new Uint8Array([65, 0, 66])], "x.txt", { type: "text/plain" }))).ok).toBe(false);
+    expect((await rec(new File([new Uint8Array([0xff, 0xfe, 0xfd])], "x.txt", { type: "text/plain" }))).ok).toBe(false);
+    expect(stored).toHaveLength(0);
+    expect((await rec(new File(["%PDF-1.7"], "a.pdf", { type: "text/html" }))).ok).toBe(true);
+    expect((await rec(new File([png], "a.png", { type: "" }))).ok).toBe(true);
+    expect((await rec(new File([jpg], "a.JPG", { type: "application/octet-stream" }))).ok).toBe(true);
+    expect((await rec(new File(["Consent given by phone."], "a.txt", { type: "" }))).ok).toBe(true);
+    expect(stored.map((s) => s.type)).toEqual(["application/pdf", "image/png", "image/jpeg", "text/plain"]);
+  });
 });

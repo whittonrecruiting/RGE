@@ -82,8 +82,8 @@ export function ConsentCard({ mpcId, latest, canEdit }: { mpcId: string; latest:
             </label>
           </div>
           <label className="flex min-w-0 flex-col gap-1 text-xs text-muted">
-            Proof (optional, PDF, image or text, up to 10 MB)
-            <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,application/pdf,image/*,text/*" className="min-w-0 text-sm text-text-soft" />
+            Proof (optional: PDF, PNG, JPEG or .txt, up to 10 MB)
+            <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" className="min-w-0 text-sm text-text-soft" />
           </label>
           <div className="flex flex-wrap gap-3">
             <button type="button" disabled={pending} onClick={submit} className={primaryButton}>

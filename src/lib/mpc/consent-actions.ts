@@ -19,7 +19,6 @@ export type ConsentInput = {
 export type ConsentResult = { ok: true } | { ok: false; error: string };
 
 const METHODS = ["verbal", "email", "signed_form"] as const;
-const PROOF_EXT = /\.(pdf|png|jpe?g|gif|webp|heic|txt|md)$/i;
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 
 /** Today's date in Phoenix, where the agency works, as YYYY-MM-DD. */
@@ -33,9 +32,33 @@ function validDate(v: unknown): v is string {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
 }
 
-function proofAllowed(file: File): boolean {
-  const t = file.type.toLowerCase();
-  return t === "application/pdf" || t.startsWith("image/") || t.startsWith("text/") || (t === "" && PROOF_EXT.test(file.name));
+const startsWith = (b: Uint8Array, sig: number[]) => sig.every((v, i) => b[i] === v);
+
+/**
+ * Decides the content type from the file extension and its leading bytes, never from the
+ * client-supplied type. Returns null when the file is not an allowed proof file.
+ */
+function proofContentType(name: string, bytes: Uint8Array): string | null {
+  const ext = /\.([A-Za-z0-9]+)$/.exec(name)?.[1]?.toLowerCase();
+  switch (ext) {
+    case "pdf":
+      return startsWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]) ? "application/pdf" : null;
+    case "png":
+      return startsWith(bytes, [0x89, 0x50, 0x4e, 0x47]) ? "image/png" : null;
+    case "jpg":
+    case "jpeg":
+      return startsWith(bytes, [0xff, 0xd8, 0xff]) ? "image/jpeg" : null;
+    case "txt":
+      if (bytes.includes(0)) return null;
+      try {
+        new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        return null;
+      }
+      return "text/plain";
+    default:
+      return null;
+  }
 }
 
 /** Adds a consent record. Earlier records are kept as history. */
@@ -56,9 +79,11 @@ export async function recordConsent(mpcId: string, input: ConsentInput): Promise
   const file = input.proofFile;
   if (file && file.size > 0) {
     if (file.size > MAX_FILE_BYTES) return fail("Proof file is larger than 10 MB.");
-    if (!proofAllowed(file)) return fail("Proof must be a PDF, an image or a text file.");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const contentType = proofContentType(file.name, bytes);
+    if (!contentType) return fail("Proof must be a PDF, an image or a text file.");
     try {
-      proofBlobUrl = (await putFile(file.name, new Uint8Array(await file.arrayBuffer()), file.type || "application/octet-stream")).url;
+      proofBlobUrl = (await putFile(file.name, bytes, contentType)).url;
     } catch (err) {
       return fail(err instanceof Error ? err.message : "The file could not be saved. Try again.");
     }
