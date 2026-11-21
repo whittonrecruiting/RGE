@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { ProfileDraft } from "@/lib/ai/extract-profile";
 
 export const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -20,7 +19,8 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-type Parts = { mpcId: string; userId: string; issuedAt: number; draft: ProfileDraft };
+/** The draft is any JSON value: a profile draft or a find more draft. Each carries its own shape. */
+type Parts = { mpcId: string; userId: string; issuedAt: number; draft: unknown };
 
 /** HMAC-SHA256 (hex) over { mpcId, userId, issuedAt, draft }. Throws if the secret is not set. */
 export function signDraft(parts: Parts): string {

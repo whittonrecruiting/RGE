@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { applyExtraction } from "@/lib/mpc/document-actions";
+import { applyFindMore, type FindMoreDraft } from "@/lib/mpc/find-more-action";
 import type { ProfileDraft } from "@/lib/ai/extract-profile";
 import type { MpcInput } from "@/lib/mpc/schema";
 import { FlagBadge } from "./badges";
@@ -40,8 +41,10 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
+const isFindMore = (d: ProfileDraft | FindMoreDraft): d is FindMoreDraft => "kind" in d && d.kind === "find_more";
+
 /**
- * Shows what extraction proposed. Profile fields and facts start checked, restrictions start
+ * Shows what extraction (or a Find more search) proposed. Profile fields and facts start checked, restrictions start
  * unchecked. Save writes only the checked items.
  */
 export function ExtractionReview({
@@ -52,11 +55,26 @@ export function ExtractionReview({
   onClose,
 }: {
   mpcId: string;
-  draft: ProfileDraft;
+  draft: ProfileDraft | FindMoreDraft;
   issuedAt: number;
   signature: string;
   onClose: () => void;
 }) {
+  if (isFindMore(draft)) {
+    return <WebReview mpcId={mpcId} draft={draft} issuedAt={issuedAt} signature={signature} onClose={onClose} />;
+  }
+  return <ProfileReview mpcId={mpcId} draft={draft} issuedAt={issuedAt} signature={signature} onClose={onClose} />;
+}
+
+type Props = { mpcId: string; issuedAt: number; signature: string; onClose: () => void };
+
+function ProfileReview({
+  mpcId,
+  draft,
+  issuedAt,
+  signature,
+  onClose,
+}: Props & { draft: ProfileDraft }) {
   const router = useRouter();
   const fieldKeys = Object.keys(draft.fields) as (keyof MpcInput)[];
   const [fields, setFields] = useState(() => new Set<string>(fieldKeys));
@@ -187,6 +205,86 @@ export function ExtractionReview({
       <div className="flex flex-wrap gap-3">
         {!empty && (
           <button type="button" onClick={save} disabled={pending || checkedCount === 0} className={primaryButton}>
+            {pending ? "Saving" : "Save checked items"}
+          </button>
+        )}
+        <button type="button" onClick={onClose} disabled={pending} className={quietButton}>
+          {empty ? "Close" : "Discard"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Find more results: every fact links to the page it came from. Nothing is saved unless checked. */
+function WebReview({ mpcId, draft, issuedAt, signature, onClose }: Props & { draft: FindMoreDraft }) {
+  const router = useRouter();
+  const [facts, setFacts] = useState(() => new Set<number>());
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const empty = draft.facts.length === 0;
+
+  function save() {
+    setError(null);
+    start(async () => {
+      const result = await applyFindMore(mpcId, { draft, issuedAt, signature, factIndexes: [...facts] });
+      if (result.ok) {
+        router.refresh();
+        onClose();
+      } else {
+        setError(result.error);
+      }
+    });
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5 rounded border border-gold p-4" aria-label="Review search results">
+      <div>
+        <h3 className="text-sm font-semibold text-text">Review what was found</h3>
+        <p className="mt-1 text-sm text-text-soft">
+          These come from public web pages. Open each source and check it is the right person before you check it. Only
+          checked items are saved.
+        </p>
+      </div>
+      {empty && <p className="text-sm text-text-soft">No sourced facts were found.</p>}
+      {!empty && (
+        <fieldset className="flex min-w-0 flex-col gap-2">
+          <legend className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-text-soft">Facts</legend>
+          {draft.facts.map((f, i) => (
+            <label key={i} className={rowClass}>
+              <input
+                type="checkbox"
+                checked={facts.has(i)}
+                onChange={() => setFacts((s) => toggle(s, i))}
+                className={checkClass}
+              />
+              <span className="min-w-0 text-sm text-text [overflow-wrap:anywhere]">
+                {f.text}
+                <span className="mt-1 block text-xs text-muted">
+                  Source:{" "}
+                  <a
+                    href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gold underline [overflow-wrap:anywhere]"
+                  >
+                    {f.url}
+                  </a>
+                </span>
+                <span className="mt-1 block border-l-2 border-line pl-2 text-xs italic text-text-soft">{f.quote}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-deny">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-3">
+        {!empty && (
+          <button type="button" onClick={save} disabled={pending || facts.size === 0} className={primaryButton}>
             {pending ? "Saving" : "Save checked items"}
           </button>
         )}

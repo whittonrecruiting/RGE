@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddSources, DocumentList } from "@/components/mpc/AddSources";
 import { StatusBadge } from "@/components/mpc/badges";
+import { FindMore } from "@/components/mpc/FindMore";
 import { ProfileForm } from "@/components/mpc/profile-form";
 import { ProfileReadOnly } from "@/components/mpc/profile-readonly";
 import { ReassignControl } from "@/components/mpc/reassign-control";
@@ -116,12 +117,28 @@ export default async function MpcPage({ params }: Props) {
               <li key={f.id} className="flex min-w-0 flex-col gap-1 p-3">
                 <span className="text-sm text-text [overflow-wrap:anywhere]">{f.text}</span>
                 <span className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                  {f.sourceRef ? `Source: ${f.sourceRef}` : `Source: ${f.sourceKind}`}
+                  {f.sourceKind === "web" && f.sourceRef ? (
+                    <span className="min-w-0 [overflow-wrap:anywhere]">
+                      Source:{" "}
+                      <a href={f.sourceRef} target="_blank" rel="noopener noreferrer" className="text-gold underline">
+                        {f.sourceRef}
+                      </a>
+                    </span>
+                  ) : f.sourceRef ? (
+                    `Source: ${f.sourceRef}`
+                  ) : (
+                    `Source: ${f.sourceKind}`
+                  )}
                   {f.status === "interview_only" && <FlagBadge>Interview only</FlagBadge>}
                 </span>
               </li>
             ))}
           </ul>
+        )}
+        {canEdit && (
+          <div className="mt-4">
+            <FindMore mpcId={mpc.id} />
+          </div>
         )}
       </Section>
       <ComingNextSection title="Restrictions" />
