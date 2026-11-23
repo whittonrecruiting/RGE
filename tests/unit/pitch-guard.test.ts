@@ -44,6 +44,60 @@ describe("checkBullet", () => {
   });
 });
 
+describe("number guard: inflation the figure match alone would miss", () => {
+  const ok = (bullet: string, fact: string) => expect(checkBullet(bullet, fact), `${bullet} | ${fact}`).toBeNull();
+  const bad = (bullet: string, fact: string) => expect(checkBullet(bullet, fact), `${bullet} | ${fact}`).toMatch(/not in its fact/);
+
+  test("existing normalizations still hold", () => {
+    bad("Managed a $1.2B insurer portfolio", "Managed a $120M insurer portfolio");
+    ok("Raised $120M for the fund", "Raised $120,000,000 for the fund");
+    ok("Raised 120 million for the fund", "Raised $120M for the fund");
+    ok("Raised $120M for the fund", "Raised $120M+ for the fund");
+    bad("Raised $120M for the fund", "Raised 120M for the fund");
+    ok("Tried two cases to verdict", "Tried 2 cases to verdict");
+    ok("Tried 40 cases to verdict", "Tried 40+ cases to verdict");
+  });
+
+  test("a spelled number combines with a following scale word", () => {
+    bad("Managed two billion in assets", "Managed two teams of associates");
+    ok("Managed two billion in assets", "Managed $2B in assets");
+    ok("Managed two billion in assets", "Managed two billion in client assets");
+  });
+
+  test("a scale word or magnitude adjective needs a figure at least that large or the same wording", () => {
+    bad("Led a billion-dollar insurer portfolio", "Led a large insurer portfolio");
+    ok("Led a billion-dollar insurer portfolio", "Led a $1.4B insurer portfolio");
+    bad("Handled multimillion-dollar coverage matters", "Handled complex coverage matters");
+    ok("Handled multimillion-dollar coverage matters", "Handled multimillion-dollar coverage matters for carriers");
+    ok("Handled multimillion-dollar coverage matters", "Handled coverage matters worth $5M each");
+    bad("Closed seven-figure settlements for carriers", "Closed $250,000 settlements for carriers");
+    ok("Closed seven-figure settlements for carriers", "Closed $1.5M settlements for carriers");
+    bad("Managed hundreds of coverage matters", "Managed 100 coverage matters");
+    ok("Managed hundreds of coverage matters", "Managed 350 coverage matters");
+    bad("Reviewed thousands of claim files", "Reviewed 900 claim files");
+    bad("Trained dozens of junior associates", "Trained 12 junior associates");
+    ok("Trained dozens of junior associates", "Trained dozens of junior associates firmwide");
+    bad("Served millions of policyholders nationwide", "Served 1 million policyholders nationwide");
+  });
+
+  test("raising qualifiers need the same or a stronger qualifier in the fact", () => {
+    bad("Tried 40+ cases to verdict", "Tried 40 cases to verdict");
+    bad("Tried over 40 cases to verdict", "Tried 40 cases to verdict");
+    bad("Tried more than 40 cases", "Tried 40 cases to verdict");
+    bad("Tried nearly 50 cases to verdict", "Tried 45 cases to verdict");
+    bad("Tried at least 40 cases", "Tried 40 cases to verdict");
+    ok("Tried over 40 cases to verdict", "Tried more than 40 cases to verdict");
+    ok("Tried 40+ cases to verdict", "Tried over 40 cases to verdict");
+  });
+
+  test("percent and currency are units", () => {
+    bad("Cut claim costs by 45%", "Supervised 45 attorneys on claims");
+    ok("Cut claim costs by 45%", "Cut claim costs by 45 percent");
+    bad("Grew a $120M user platform", "Grew a platform to 120M users");
+    ok("Recovered $120M for clients", "Recovered 120 million dollars for clients");
+  });
+});
+
 describe("numbersIn", () => {
   test("normalizes figures to plain values", () => {
     expect(numbersIn("$120M and $1.2B and $250K and 45% and 1,200")).toEqual([120_000_000, 1_200_000_000, 250_000, 45, 1200]);

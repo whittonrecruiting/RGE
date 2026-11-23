@@ -6,7 +6,7 @@
 
 const EM_DASH = String.fromCharCode(0x2014);
 
-const MULTIPLIERS: Record<string, number> = {
+const SCALES: Record<string, number> = {
   k: 1e3,
   thousand: 1e3,
   m: 1e6,
@@ -19,43 +19,141 @@ const MULTIPLIERS: Record<string, number> = {
   t: 1e12,
   trillion: 1e12,
 };
+// Scale words that may follow a spelled number ("two billion").
+const WORD_SCALES: Record<string, number> = { hundred: 100, thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
 
 const WORD_NUMBERS: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
   eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
   eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
-  eighty: 80, ninety: 90, hundred: 100, dozen: 12, dozens: 12, hundreds: 100, thousands: 1000,
-  single: 1, double: 2, triple: 3, first: 1, second: 2, third: 3,
+  eighty: 80, ninety: 90, hundred: 100, dozen: 12, single: 1, double: 2, triple: 3, first: 1,
+  second: 2, third: 3,
 };
 
-// A figure with an optional scale word: $120M, $120 million, $120,000,000, 1.2bn, 45%. A scale
-// letter followed by "&" is not a scale ("12 M&A deals").
-const FIGURE = /(\d[\d,]*(?:\.\d+)?)(?:\s*(k|thousand|mm|mil|million|m|bn|billion|b|trillion|t)\b(?!&))?/gi;
-const WORD_NUMBER = new RegExp(String.raw`\b(${Object.keys(WORD_NUMBERS).join("|")})\b`, "gi");
+/**
+ * Words that claim a size without a number. The value is the smallest figure that backs the claim:
+ * "hundreds of" needs at least 200, "multimillion" at least 2 million, "six-figure" at least 100,000.
+ */
+const MAGNITUDES: { pattern: string; min: number; dollars?: true }[] = [
+  { pattern: String.raw`multi-?trillion`, min: 2e12 },
+  { pattern: String.raw`multi-?billion`, min: 2e9 },
+  { pattern: String.raw`multi-?million`, min: 2e6 },
+  { pattern: String.raw`trillion-dollar`, min: 1e12, dollars: true },
+  { pattern: String.raw`billion-dollar`, min: 1e9, dollars: true },
+  { pattern: String.raw`million-dollar`, min: 1e6, dollars: true },
+  { pattern: String.raw`nine[\s-]figures?`, min: 1e8 },
+  { pattern: String.raw`eight[\s-]figures?`, min: 1e7 },
+  { pattern: String.raw`seven[\s-]figures?`, min: 1e6 },
+  { pattern: String.raw`six[\s-]figures?`, min: 1e5 },
+  { pattern: String.raw`trillions`, min: 2e12 },
+  { pattern: String.raw`billions`, min: 2e9 },
+  { pattern: String.raw`millions`, min: 2e6 },
+  { pattern: String.raw`hundreds\s+of`, min: 200 },
+  { pattern: String.raw`thousands\s+of`, min: 2000 },
+  { pattern: String.raw`dozens\s+of`, min: 24 },
+  { pattern: String.raw`trillion`, min: 1e12 },
+  { pattern: String.raw`billion`, min: 1e9 },
+  { pattern: String.raw`million`, min: 1e6 },
+];
 
-type Figure = { raw: string; value: number };
+const SCALE_ALT = "k|thousand|mm|mil|million|m|bn|billion|b|trillion|t";
+const WORD_ALT = Object.keys(WORD_NUMBERS).join("|");
+const WORD_SCALE_ALT = Object.keys(WORD_SCALES).join("|");
+const UNIT_AFTER = String.raw`(\s*%|\s+percent\b|\s+(?:dollars|usd)\b)?`;
+// One pass, left to right. Alternatives: a written figure ($120M, 120 million, $120,000,000, 40+,
+// 45%), a magnitude word (multimillion, seven-figure), or a spelled number with an optional scale
+// (two billion). Magnitudes come before spelled numbers so "seven-figure" is not read as 7.
+// A scale letter followed by "&" is not a scale ("12 M&A deals").
+const FIGURE = new RegExp(
+  [
+    String.raw`(?<cur>\$|\busd\s*)?(?<digits>\d[\d,]*(?:\.\d+)?)(?<plus1>\+)?(?:\s*(?<scale>${SCALE_ALT})\b(?!&))?(?<plus2>\+)?${UNIT_AFTER.replace("(", "(?<unit1>")}`,
+    String.raw`\b(?<mag>${MAGNITUDES.map((m) => m.pattern).join("|")})\b`,
+    String.raw`\b(?<word>${WORD_ALT})\b(?:[\s-]+(?<wscale>${WORD_SCALE_ALT})\b)?(?<plus3>\+)?${UNIT_AFTER.replace("(", "(?<unit2>")}`,
+  ].join("|"),
+  "gi",
+);
+// Qualifiers that raise a claim when they come right before a figure.
+const RAISE_BEFORE = /\b(over|more than|nearly|almost|upwards of|at least|in excess of|north of|exceeding|above)\s*$/i;
+
+type Unit = "$" | "%" | null;
+type Figure =
+  | { kind: "number"; raw: string; value: number; unit: Unit; raised: boolean }
+  | { kind: "magnitude"; raw: string; min: number; dollars: boolean };
+
+const unitOf = (cur: string | undefined, after: string | undefined): Unit => {
+  const a = (after ?? "").trim().toLowerCase();
+  if (a === "%" || a === "percent") return "%";
+  if (cur || a === "dollars" || a === "usd") return "$";
+  return null;
+};
 
 function figuresIn(text: string): Figure[] {
-  const found: (Figure & { at: number })[] = [];
+  const out: Figure[] = [];
   for (const m of text.matchAll(FIGURE)) {
-    const digits = m[1].replace(/,+$/, "").replace(/,/g, "");
-    const base = Number(digits);
-    if (!Number.isFinite(base)) continue;
-    const scale = m[2] ? (MULTIPLIERS[m[2].toLowerCase()] ?? 1) : 1;
-    found.push({ at: m.index ?? 0, raw: m[0].trim(), value: Math.round(base * scale * 1e6) / 1e6 });
+    const g = m.groups ?? {};
+    const at = m.index ?? 0;
+    const raw = m[0].trim();
+    if (g.mag) {
+      const key = g.mag.toLowerCase();
+      const def = MAGNITUDES.find((d) => new RegExp(`^(?:${d.pattern})$`, "i").test(key))!;
+      out.push({ kind: "magnitude", raw: key.replace(/\s+/g, " "), min: def.min, dollars: def.dollars === true });
+      continue;
+    }
+    let value: number;
+    if (g.digits !== undefined) {
+      const base = Number(g.digits.replace(/,+$/, "").replace(/,/g, ""));
+      if (!Number.isFinite(base)) continue;
+      value = base * (g.scale ? (SCALES[g.scale.toLowerCase()] ?? 1) : 1);
+    } else {
+      value = WORD_NUMBERS[g.word.toLowerCase()] * (g.wscale ? WORD_SCALES[g.wscale.toLowerCase()] : 1);
+    }
+    const raised = Boolean(g.plus1 || g.plus2 || g.plus3) || RAISE_BEFORE.test(text.slice(Math.max(0, at - 30), at));
+    out.push({
+      kind: "number",
+      raw,
+      value: Math.round(value * 1e6) / 1e6,
+      unit: unitOf(g.cur, g.unit1 ?? g.unit2),
+      raised,
+    });
   }
-  for (const m of text.matchAll(WORD_NUMBER)) {
-    found.push({ at: m.index ?? 0, raw: m[1], value: WORD_NUMBERS[m[1].toLowerCase()] });
-  }
-  return found.sort((a, b) => a.at - b.at).map(({ raw, value }) => ({ raw, value }));
+  return out;
 }
 
 /** Every number in the text as a plain value, in order of appearance. $120M, $120 million and $120,000,000 are all 120000000. */
 export function numbersIn(text: string): number[] {
-  return figuresIn(text).map((f) => f.value);
+  return figuresIn(text).flatMap((f) => (f.kind === "number" ? [f.value] : []));
 }
 
 const sameNumber = (a: number, b: number) => Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b)) * 1e-9;
+
+/**
+ * True when the source backs the figure. A number needs the same value, in the same unit when it
+ * has one ($ or %), and a raising qualifier (40+, over 40) needs one in the source too. A magnitude word
+ * needs the same wording or a source figure at least that large (in dollars for "million-dollar").
+ */
+function backed(f: Figure, source: Figure[]): boolean {
+  if (f.kind === "number") {
+    // A unit on the claim ($ or %) must be in the source too; dropping one is not an inflation.
+    return source.some(
+      (s) =>
+        s.kind === "number" &&
+        sameNumber(s.value, f.value) &&
+        (f.unit === null || s.unit === f.unit) &&
+        (!f.raised || s.raised),
+    );
+  }
+  return source.some((s) =>
+    s.kind === "magnitude"
+      ? s.raw === f.raw
+      : s.unit !== "%" && s.value >= f.min && (!f.dollars || s.unit === "$"),
+  );
+}
+
+/** The first figure in text that the source does not back, as written, or null. */
+export function unbackedFigure(text: string, source: string): string | null {
+  const allowed = figuresIn(source);
+  return figuresIn(text).find((f) => !backed(f, allowed))?.raw ?? null;
+}
 
 const PAY = [
   /\b(salary|salaries|compensation|wage|wages|bonus|bonuses|ote|paycheck|pay\s+(range|target|floor|expectations?)|base\s+pay|total\s+comp|comp\s+package)\b/i,
@@ -90,9 +188,8 @@ export function checkPhrase(text: string, sourceText: string, rules: PhraseRules
   if (EMOJI.test(t)) return `Remove emojis from the ${rules.label}.`;
   if (PAY.some((p) => p.test(t))) return `Leave pay out of the ${rules.label}.`;
   if (WORK_AUTH.test(t)) return `Leave visa and work authorization out of the ${rules.label}.`;
-  const allowed = numbersIn(sourceText);
-  const extra = figuresIn(t).find((f) => !allowed.some((a) => sameNumber(a, f.value)));
-  if (extra) return `The ${rules.label} has a number that is not in its fact: ${extra.raw}.`;
+  const extra = unbackedFigure(t, sourceText);
+  if (extra) return `The ${rules.label} has a number that is not in its fact: ${extra}.`;
   return null;
 }
 

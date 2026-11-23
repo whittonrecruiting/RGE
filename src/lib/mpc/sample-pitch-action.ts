@@ -110,7 +110,10 @@ export async function generateSamplePitch(mpcId: string, opts: SamplePitchOption
   const eligible = new Map(facts.map((f) => [f.id, f.text]));
   const source =
     Array.isArray(opts?.keep) && opts.keep.length > 0
-      ? opts.keep.slice(0, 3).flatMap((b, i) => (isBulletShape(b) ? [{ position: i + 1, ...b }] : []))
+      ? opts.keep
+          .slice(0, 3)
+          // Only factId and text from the client; the position is the index.
+          .flatMap((b, i) => (isBulletShape(b) ? [{ position: i + 1, factId: b.factId, text: b.text }] : []))
       : saved;
   const kept = new Map<number, PitchBullet>();
   for (const b of source) {

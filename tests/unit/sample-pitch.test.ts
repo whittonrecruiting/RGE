@@ -289,6 +289,34 @@ describe("saved bullets", () => {
     expect(again.ok && again.pitch.bullets).toEqual(good(ids));
   });
 
+  test("bad keep input is dropped and rewritten; a keep item cannot choose its position", async () => {
+    const ids = await mpcWithFacts();
+    const otherMpc = await newMpc(f.recB);
+    const foreign = await seedFact(db, { agencyId: f.agency.id, mpcId: otherMpc, text: FACTS.d, status: "usable" });
+    const [a, b, c] = good(ids);
+
+    const gen = fakeGenerate({ background: BACKGROUND, bullets: [b, c] });
+    setTestGenerate(gen);
+    const r = await generateAs(f.recA, ids.id, {
+      keep: [
+        { ...a, position: 3 } as typeof a, // valid, but the position comes from the index
+        { factId: ids.hidden, text: "Wants to leave a difficult partner" }, // interview-only
+        { factId: foreign.id, text: "Argued 2 appeals before the Ninth Circuit" }, // another MPC's fact
+      ],
+    });
+    expect(r.ok && r.pitch.bullets).toEqual([a, b, c]);
+    expect(r.ok && r.pitch.body).not.toMatch(/difficult partner|Ninth Circuit/);
+    expect(gen.calls[0].prompt).not.toContain(ids.hidden);
+    expect(gen.calls[0].prompt).not.toContain(foreign.id);
+
+    setTestGenerate(fakeGenerate({ background: BACKGROUND, bullets: [b] }));
+    const inflated = await generateAs(f.recA, ids.id, {
+      keep: [{ factId: ids.b, text: "Led discovery on a $500M bad faith matter" }, a, c],
+    });
+    expect(inflated.ok && inflated.pitch.bullets).toEqual([b, a, c]);
+    expect(inflated.ok && inflated.pitch.body).not.toContain("$500M");
+  });
+
   test("swapping with no other strong fact left is an error", async () => {
     const ids = await savedMpc();
     const gen = fakeGenerate({ background: BACKGROUND, bullets: [] });
