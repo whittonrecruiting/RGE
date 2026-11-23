@@ -429,12 +429,23 @@ describe("draft MPCs", () => {
     expect(mpc).toMatchObject({ status: "removed", headlineRole: null, location: null });
     expect((await listMpcsAs(f.recA, { owner: "me" })).map((r) => r.id)).not.toContain(id);
     expect((await listMpcsAs(f.recA, { owner: "me", status: "removed" })).map((r) => r.id)).toEqual([id]);
-    // It cannot come back as active without its required fields.
-    expect(await setStatusAs(f.recA, id, "active")).toEqual({
-      ok: false,
-      error: "Add the headline role and location before activating.",
-    });
+    // It cannot be paused without its required fields.
     expect(await setStatusAs(f.recA, id, "paused")).toMatchObject({ ok: false });
+    expect((await getMpcAs(f.recA, id))?.status).toBe("removed");
+  });
+
+  test("restoring a removed MPC without role or location brings it back as a draft", async () => {
+    const id = await mustDraft(f.recA);
+    expect(await setStatusAs(f.recA, id, "removed")).toEqual({ ok: true });
+    expect(await setStatusAs(f.recA, id, "active")).toEqual({ ok: true });
+    expect(await getMpcAs(f.recA, id)).toMatchObject({ status: "draft", headlineRole: null, location: null });
+  });
+
+  test("restoring a complete removed MPC makes it active", async () => {
+    const id = await mustCreate(f.recA);
+    expect(await setStatusAs(f.recA, id, "removed")).toEqual({ ok: true });
+    expect(await setStatusAs(f.recA, id, "active")).toEqual({ ok: true });
+    expect((await getMpcAs(f.recA, id))?.status).toBe("active");
   });
 
   test("a teammate recruiter cannot discard a draft", async () => {

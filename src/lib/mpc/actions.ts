@@ -160,10 +160,14 @@ export async function setMpcStatus(id: string, status: SettableStatus, reason?: 
     if (current.status === "placed") return fail(PLACED);
     // Only a draft (or a discarded one, status removed) may lack these. Discarding a draft is allowed;
     // the database refuses active or paused without them.
-    if (!isComplete(current) && status !== "removed") return fail(status === "active" ? DRAFT_INCOMPLETE : DRAFT_NO_PAUSE);
+    // Restoring a removed MPC that never got its role and location brings it back as a draft.
+    const next = !isComplete(current) && current.status === "removed" && status === "active" ? "draft" : status;
+    if (!isComplete(current) && next !== "removed" && next !== "draft") {
+      return fail(status === "active" ? DRAFT_INCOMPLETE : DRAFT_NO_PAUSE);
+    }
     await tx
       .update(mpcs)
-      .set({ status, pauseReason: status === "paused" ? cleanReason(reason) : null, updatedAt: new Date() })
+      .set({ status: next, pauseReason: status === "paused" ? cleanReason(reason) : null, updatedAt: new Date() })
       .where(eq(mpcs.id, id));
     return { ok: true };
   });
