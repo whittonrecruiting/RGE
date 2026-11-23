@@ -47,6 +47,15 @@ export function MpcFlags({
   );
 }
 
+/** Green "Pitch ready" or amber "Needs facts". Callers leave it out for drafts. */
+export function PitchReadyBadge({ ready }: { ready: boolean }) {
+  return ready ? (
+    <span className={`${badge} border-ok text-ok`}>Pitch ready</span>
+  ) : (
+    <FlagBadge>Needs facts</FlagBadge>
+  );
+}
+
 /** Shown at the top of a draft MPC's page. */
 export function DraftBanner() {
   return (

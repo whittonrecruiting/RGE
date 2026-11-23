@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { agencies, memberships, mpcFacts, mpcs, users } from "@/db/schema";
+import { agencies, memberships, mpcFacts, mpcSavedBullets, mpcs, users } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { neonDb } from "@/db/client";
 import { asOwner, createTestDb, seedAgencies } from "../../helpers/test-db";
@@ -107,7 +107,7 @@ describe("agency isolation (row-level security)", () => {
     const byName = Object.fromEntries(res.rows.map((r) => [r.relname, r]));
     const scoped = [
       "agencies", "memberships", "mpcs", "mpc_credentials", "mpc_facts",
-      "mpc_restrictions", "mpc_consents", "mpc_documents", "agency_settings", "ai_usage",
+      "mpc_restrictions", "mpc_consents", "mpc_documents", "mpc_saved_bullets", "agency_settings", "ai_usage",
     ];
     expect(Object.keys(byName).sort()).toEqual([...scoped, "users"].sort());
     for (const t of [...scoped, "users"]) expect(byName[t], t).toMatchObject({ enabled: true, forced: true });
@@ -119,7 +119,7 @@ describe("agency isolation (row-level security)", () => {
     const rlsMigrations = readdirSync(dir)
       .filter((f) => /^\d{4}_rls.*\.sql$/.test(f))
       .sort();
-    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql", "0004_rls_system.sql", "0006_rls_membership_removal.sql", "0008_rls_plan1_hardening.sql"]);
+    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql", "0004_rls_system.sql", "0006_rls_membership_removal.sql", "0008_rls_plan1_hardening.sql", "0013_rls_sample_pitch.sql"]);
     const combined = rlsMigrations.map((f) => normalize(readFileSync(join(dir, f), "utf8"))).join("\n\n");
     expect(combined).toBe(normalize(readFileSync(join(process.cwd(), "src/db/rls.sql"), "utf8")));
   });
@@ -186,6 +186,21 @@ describe("cross-agency links through foreign keys", () => {
     await withAgency(a.id, (tx) =>
       tx.insert(mpcFacts).values({ agencyId: a.id, mpcId: aMpc.id, text: "Fact", sourceKind: "manual" }),
     );
+  });
+
+  test("a saved pitch bullet cannot point at another agency's fact", async () => {
+    const { db, a, b, aMpc, bMpc } = await setupWithMpcs();
+    const [bFact] = await withAgency(b.id, (tx) =>
+      tx.insert(mpcFacts).values({ agencyId: b.id, mpcId: bMpc.id, text: "Fact", sourceKind: "manual" }).returning(),
+    );
+    const [aFact] = await withAgency(a.id, (tx) =>
+      tx.insert(mpcFacts).values({ agencyId: a.id, mpcId: aMpc.id, text: "Fact", sourceKind: "manual" }).returning(),
+    );
+    const row = (factId: string) => ({ agencyId: a.id, mpcId: aMpc.id, factId, position: 1, text: "Led a matter", createdBy: a.recruiterId });
+    await expect(withAgency(a.id, (tx) => tx.insert(mpcSavedBullets).values(row(bFact.id)))).rejects.toThrow();
+    await withAgency(a.id, (tx) => tx.insert(mpcSavedBullets).values(row(aFact.id)));
+    expect(await withAgency(b.id, (tx) => tx.select().from(mpcSavedBullets))).toHaveLength(0);
+    expect(await asOwner(db, (tx) => tx.select().from(mpcSavedBullets))).toHaveLength(1);
   });
 
   test("MPC owner and fact confirmer must be members of the same agency", async () => {

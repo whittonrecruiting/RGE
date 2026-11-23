@@ -2,7 +2,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { mpcCredentials, mpcFacts, mpcRestrictions, mpcs } from "@/db/schema";
+import { mpcCredentials, mpcFacts, mpcRestrictions, mpcSavedBullets, mpcs } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { requireMember, type Member } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -79,7 +79,8 @@ export async function confirmFact(factId: string): Promise<FactActionResult> {
  * Changes the wording and records who edited it. A usable or confirmed fact from a resume, notes,
  * a transcript or the web no longer matches its quote once reworded, so it becomes a manual fact
  * confirmed by the editor (source and quote cleared). A manual fact stays manual and confirmed. An
- * interview-only fact keeps its status and source: it still needs a confirm before any pitch.
+ * interview-only fact keeps its status and source: it still needs a confirm before any pitch. Any
+ * saved pitch bullet for the fact is cleared.
  */
 export async function updateFact(factId: string, text: string): Promise<FactActionResult> {
   const member = await requireMember();
@@ -90,8 +91,8 @@ export async function updateFact(factId: string, text: string): Promise<FactActi
   const now = new Date();
   const edit = { text: clean.text, editedBy: member.userId, editedAt: now, updatedAt: now };
   const converts = auth.status !== "interview_only" && auth.sourceKind !== "manual";
-  await withAgency(member.agencyId, (tx) =>
-    tx
+  await withAgency(member.agencyId, async (tx) => {
+    await tx
       .update(mpcFacts)
       .set(
         converts
@@ -107,12 +108,17 @@ export async function updateFact(factId: string, text: string): Promise<FactActi
             }
           : edit,
       )
-      .where(eq(mpcFacts.id, factId)),
-  );
+      .where(eq(mpcFacts.id, factId));
+    // A saved pitch bullet was checked against the old wording, so it goes with the edit. After the
+    // update: the fact's row lock makes a concurrent saveBullets (which locks the fact) finish first,
+    // so its bullet is visible here and removed.
+    await tx.delete(mpcSavedBullets).where(eq(mpcSavedBullets.factId, factId));
+  });
   refresh(auth.mpcId);
   return { ok: true };
 }
 
+/** Deletes the fact. Its saved pitch bullet, if any, goes with it (ON DELETE CASCADE). */
 export async function deleteFact(factId: string): Promise<FactActionResult> {
   const member = await requireMember();
   const auth = await authorizeFact(member, factId);

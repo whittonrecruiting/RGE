@@ -60,3 +60,55 @@ test("facts changed by hand are labelled", async ({ page }) => {
   await expect(page.getByText("Source: Edited by hand").first()).toBeVisible();
   await expect(page.getByText("Source: Added by hand").first()).toBeVisible();
 });
+
+// Sample pitch card states (?pitch=preview|saved|draft|empty).
+for (const vp of [
+  { w: 390, h: 844, name: "phone" },
+  { w: 1440, h: 900, name: "desktop" },
+]) {
+  test(`sample pitch card fits and shows its controls in every state on ${vp.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.w, height: vp.h });
+    const inView = async (name: string) => {
+      const btn = page.getByRole("button", { name, exact: true });
+      await btn.scrollIntoViewIfNeeded();
+      await expect(btn).toBeVisible();
+      const box = await btn.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(vp.w);
+    };
+
+    await page.goto("/dev/mpc-profile?pitch=preview");
+    expect(await overflowReport(page)).toEqual(FITS);
+    const email = page.getByTestId("sample-pitch-email");
+    await expect(email).toContainText("Subject:");
+    await expect(email).toContainText("Hi [First Name],");
+    expect(await email.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+    await expect(page.getByText("Only 2 bullets passed the checks. Regenerate to try again.")).toHaveClass(/text-flag/);
+    for (const name of ["Regenerate", "Swap bullet 1", "Swap bullet 2", "Use these bullets"]) await inView(name);
+    await expect(page.getByRole("button", { name: "Use these bullets" })).toBeDisabled();
+
+    await page.goto("/dev/mpc-profile?pitch=saved");
+    expect(await overflowReport(page)).toEqual(FITS);
+    await expect(page.getByText("Saved bullets in use")).toBeVisible();
+    await inView("Clear");
+
+    await page.goto("/dev/mpc-profile?pitch=empty");
+    expect(await overflowReport(page)).toEqual(FITS);
+    await expect(page.getByText("Needs facts", { exact: true })).toBeVisible();
+    await expect(page.getByText("Only 2 strong facts. Confirm a note or run Find more.")).toBeVisible();
+    await inView("Preview a pitch");
+
+    await page.goto("/dev/mpc-profile?pitch=draft");
+    expect(await overflowReport(page)).toEqual(FITS);
+    await expect(page.getByText("Activate this MPC before previewing a pitch.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Preview a pitch" })).toHaveCount(0);
+  });
+}
+
+test("a teammate sees the saved bullets and preview but no pitch controls", async ({ page }) => {
+  await page.goto("/dev/mpc-profile?view=readonly&pitch=saved");
+  await expect(page.getByText("Saved bullets in use")).toBeVisible();
+  for (const name of ["Clear", "Regenerate", "Swap bullet 1", "Use these bullets", "Preview a pitch"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
+});

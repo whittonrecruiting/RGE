@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { MpcRow } from "@/lib/mpc/queries";
 import { mpcTitle } from "@/lib/mpc/schema";
-import { MpcFlags, StatusBadge } from "./badges";
+import { MpcFlags, PitchReadyBadge, StatusBadge } from "./badges";
 
 const MISSING_LABEL = {
   headlineRole: "headline role",
@@ -39,6 +39,7 @@ export function MpcList({ rows, showOwner }: { rows: MpcRow[]; showOwner: boolea
             {showOwner && <p className="mt-1 [overflow-wrap:anywhere] text-xs text-muted">Owner: {r.ownerName}</p>}
             {missingText(r) && <p className="mt-1 text-xs text-muted">{missingText(r)}</p>}
             <div className="mt-3 flex flex-wrap gap-2 empty:hidden">
+              {r.status !== "draft" && <PitchReadyBadge ready={r.pitchReady} />}
               <MpcFlags
                 consentOnFile={r.consentOnFile}
                 interviewOnlyCount={r.interviewOnlyCount}
@@ -77,6 +78,7 @@ export function MpcList({ rows, showOwner }: { rows: MpcRow[]; showOwner: boolea
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
+                    {r.status !== "draft" && <PitchReadyBadge ready={r.pitchReady} />}
                     <MpcFlags
                       consentOnFile={r.consentOnFile}
                       interviewOnlyCount={r.interviewOnlyCount}

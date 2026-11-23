@@ -7,19 +7,21 @@ import { StatusBadge } from "@/components/mpc/badges";
 import { ConsentCard } from "@/components/mpc/ConsentCard";
 import { FactList } from "@/components/mpc/FactList";
 import { FindMore } from "@/components/mpc/FindMore";
+import { SamplePitch } from "@/components/mpc/SamplePitch";
 import { CredentialsEditor, RestrictionsEditor } from "@/components/mpc/RestrictionsEditor";
 import { ProfileForm } from "@/components/mpc/profile-form";
 import { ProfileReadOnly } from "@/components/mpc/profile-readonly";
 import { ReassignControl } from "@/components/mpc/reassign-control";
 import { Section } from "@/components/mpc/section";
 import { StatusControls } from "@/components/mpc/status-controls";
-import { DraftBanner, FlagBadge } from "@/components/mpc/badges";
+import { DraftBanner, FlagBadge, PitchReadyBadge } from "@/components/mpc/badges";
 import { PageTitle } from "@/components/shell/page-title";
 import { requireMember } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { listDocuments, listFacts } from "@/lib/mpc/document-queries";
 import { listConsents, listCredentials, listRestrictions } from "@/lib/mpc/fact-queries";
-import { getMpc, listActiveMembers } from "@/lib/mpc/queries";
+import { getMpc, getPitchReadiness, listActiveMembers, listSavedBullets } from "@/lib/mpc/queries";
+import { strongFactsMessage } from "@/lib/mpc/pitch-guard";
 import { mpcTitle } from "@/lib/mpc/schema";
 
 export const metadata: Metadata = { title: "MPC" };
@@ -36,13 +38,16 @@ export default async function MpcPage({ params, searchParams }: Props) {
   const canEdit = can(member, "mpc.edit", { ownerUserId: mpc.ownerUserId });
   const canReassign = can(member, "team.manage");
   const members = canReassign ? await listActiveMembers(member) : [];
-  const [documents, facts, restrictions, credentials, consents] = await Promise.all([
+  const [documents, facts, restrictions, credentials, consents, readiness, savedBullets] = await Promise.all([
     listDocuments(member, mpc.id),
     listFacts(member, mpc.id),
     listRestrictions(member, mpc.id),
     listCredentials(member, mpc.id),
     listConsents(member, mpc.id),
+    getPitchReadiness(member, mpc.id),
+    listSavedBullets(member, mpc.id),
   ]);
+  const isDraft = mpc.status === "draft";
   const factItems = facts.map((f) => ({
     id: f.id,
     text: f.text,
@@ -78,6 +83,7 @@ export default async function MpcPage({ params, searchParams }: Props) {
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StatusBadge status={mpc.status} />
+          {!isDraft && <PitchReadyBadge ready={readiness.pitchReady} />}
           {mpc.ownerRemoved && <FlagBadge>Owner removed</FlagBadge>}
           <span className="text-sm text-text-soft [overflow-wrap:anywhere]">
             {mpc.location ? `${mpc.location} · ` : ""}Owner: {mpc.ownerName}
@@ -88,11 +94,11 @@ export default async function MpcPage({ params, searchParams }: Props) {
         )}
       </div>
 
-      {mpc.status === "draft" && <DraftBanner />}
+      {isDraft && <DraftBanner />}
 
       {/* Straight after Build profile: read the documents and open the review here, at the top. Always
           mounted for editors so a later revalidation (no ?review) cannot close an open review. */}
-      {canEdit && <BuildReview mpcId={mpc.id} autoStart={review === "1" && documents.length > 0} />}
+      {canEdit && <BuildReview key={mpc.id} mpcId={mpc.id} autoStart={review === "1" && documents.length > 0} />}
 
       {!canEdit && (
         <p className="rounded border border-line bg-card p-4 text-sm text-text-soft">
@@ -105,7 +111,7 @@ export default async function MpcPage({ params, searchParams }: Props) {
           <ProfileForm
             key={mpc.updatedAt.toISOString()}
             mpcId={mpc.id}
-            draft={mpc.status === "draft"}
+            draft={isDraft}
             initial={{
               headlineRole: mpc.headlineRole,
               location: mpc.location,
@@ -150,6 +156,16 @@ export default async function MpcPage({ params, searchParams }: Props) {
             <FindMore mpcId={mpc.id} />
           </div>
         )}
+      </Section>
+      <Section title="Sample pitch">
+        <SamplePitch
+          mpcId={mpc.id}
+          canEdit={canEdit}
+          isDraft={isDraft}
+          pitchReady={readiness.pitchReady}
+          reason={readiness.pitchReady ? null : strongFactsMessage(readiness.strongFactCount)}
+          saved={savedBullets}
+        />
       </Section>
       <Section title="Restrictions">
         <RestrictionsEditor

@@ -4,13 +4,13 @@ import { withAgency } from "@/db/with-agency";
 import type { Member } from "@/lib/auth";
 import { MODELS, NO_USAGE, type AiUsage } from "./models";
 
-/** Paid AI calls (extraction and Find more together), over rolling windows. The only place to change them. */
+/** Paid AI calls (extraction, Find more and sample pitches together), over rolling windows. The only place to change them. */
 export const AI_LIMITS = { perUserPerHour: 30, perAgencyPerDay: 300 } as const;
 
 export const USER_HOURLY_LIMIT_ERROR = "You've hit the hourly limit for AI lookups. Try again later.";
 export const AGENCY_DAILY_LIMIT_ERROR = "Your agency has hit today's limit for AI lookups. Try again tomorrow.";
 
-export type AiPurpose = "extraction" | "find_more";
+export type AiPurpose = "extraction" | "find_more" | "sample_pitch";
 
 /**
  * Returns the error to show when the member or their agency is at a limit, otherwise null. Run it

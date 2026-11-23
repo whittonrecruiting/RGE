@@ -1,5 +1,5 @@
-import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
-import { memberships, mpcConsents, mpcFacts, mpcs, users } from "@/db/schema";
+import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
+import { memberships, mpcConsents, mpcFacts, mpcSavedBullets, mpcs, users } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import type { Role, Member } from "@/lib/auth";
 import type { MpcStatus } from "./schema";
@@ -58,7 +58,14 @@ export type MpcRow = {
   consentOnFile: boolean;
   interviewOnlyCount: number;
   missing: Missing[];
+  /** Three strong (usable or confirmed) facts, or three saved bullets. Drafts show no badge. */
+  pitchReady: boolean;
 };
+
+/** Facts a pitch may use. Interview-only facts need a confirm first. */
+export const STRONG_FACT_STATUSES = ["usable", "confirmed"] as const;
+
+export const isPitchReady = (strongFactCount: number, savedCount: number) => strongFactCount >= 3 || savedCount === 3;
 
 /** MPCs of the member's agency with the flags the list needs. Row-level security scopes the agency. */
 export async function listMpcs(member: Member, filter: MpcFilter): Promise<MpcRow[]> {
@@ -96,6 +103,25 @@ export async function listMpcs(member: Member, filter: MpcFilter): Promise<MpcRo
       ).map((r) => [r.mpcId, r.n]),
     );
 
+    const strong = new Map(
+      (
+        await tx
+          .select({ mpcId: mpcFacts.mpcId, n: count() })
+          .from(mpcFacts)
+          .where(and(inArray(mpcFacts.mpcId, ids), inArray(mpcFacts.status, [...STRONG_FACT_STATUSES])))
+          .groupBy(mpcFacts.mpcId)
+      ).map((r) => [r.mpcId, r.n]),
+    );
+    const saved = new Map(
+      (
+        await tx
+          .select({ mpcId: mpcSavedBullets.mpcId, n: count() })
+          .from(mpcSavedBullets)
+          .where(inArray(mpcSavedBullets.mpcId, ids))
+          .groupBy(mpcSavedBullets.mpcId)
+      ).map((r) => [r.mpcId, r.n]),
+    );
+
     return rows.map((r) => {
       const missing: Missing[] = [];
       if (r.headlineRole === null) missing.push("headlineRole");
@@ -115,6 +141,7 @@ export async function listMpcs(member: Member, filter: MpcFilter): Promise<MpcRo
         consentOnFile: consented.has(r.id),
         interviewOnlyCount: interviewOnly.get(r.id) ?? 0,
         missing,
+        pitchReady: isPitchReady(strong.get(r.id) ?? 0, saved.get(r.id) ?? 0),
       };
     });
   });
@@ -161,6 +188,35 @@ export async function getMpc(member: Member, id: string): Promise<MpcDetail | nu
   if (!row) return null;
   const { ownerStatus, ...rest } = row;
   return { ...rest, ownerRemoved: ownerStatus === "removed" } as MpcDetail;
+}
+
+export type PitchReadiness = { strongFactCount: number; savedCount: number; pitchReady: boolean };
+
+/** Whether one MPC has enough strong facts (or saved bullets) to pitch. Any member may see it. */
+export async function getPitchReadiness(member: Member, mpcId: string): Promise<PitchReadiness> {
+  if (!isUuid(mpcId)) return { strongFactCount: 0, savedCount: 0, pitchReady: false };
+  return withAgency(member.agencyId, async (tx) => {
+    const [strong] = await tx
+      .select({ n: count() })
+      .from(mpcFacts)
+      .where(and(eq(mpcFacts.mpcId, mpcId), inArray(mpcFacts.status, [...STRONG_FACT_STATUSES])));
+    const [saved] = await tx.select({ n: count() }).from(mpcSavedBullets).where(eq(mpcSavedBullets.mpcId, mpcId));
+    return { strongFactCount: strong.n, savedCount: saved.n, pitchReady: isPitchReady(strong.n, saved.n) };
+  });
+}
+
+export type SavedBulletRow = { position: number; factId: string; text: string };
+
+/** The recruiter's saved pitch bullets for one MPC, in position order. */
+export async function listSavedBullets(member: Member, mpcId: string): Promise<SavedBulletRow[]> {
+  if (!isUuid(mpcId)) return [];
+  return withAgency(member.agencyId, (tx) =>
+    tx
+      .select({ position: mpcSavedBullets.position, factId: mpcSavedBullets.factId, text: mpcSavedBullets.text })
+      .from(mpcSavedBullets)
+      .where(eq(mpcSavedBullets.mpcId, mpcId))
+      .orderBy(asc(mpcSavedBullets.position)),
+  );
 }
 
 export type TeamMemberOption = { userId: string; name: string; role: Role };

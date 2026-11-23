@@ -85,6 +85,20 @@
       "when": 1795468740680,
       "tag": "0011_mpc_discard_draft",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795470275777,
+      "tag": "0012_sample_pitch",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795470291382,
+      "tag": "0013_rls_sample_pitch",
+      "breakpoints": true
     }
   ]
 }

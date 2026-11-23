@@ -50,6 +50,18 @@ test("a draft with no role shows as Untitled draft with an amber Draft badge", a
   await expect(page.getByRole("link", { name: "Draft", exact: true })).toBeVisible();
 });
 
+test("list rows show Pitch ready or Needs facts, and drafts show neither", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dev/mpcs");
+  const ready = page.getByRole("row").filter({ hasText: "Scottsdale, AZ" });
+  await expect(ready.getByText("Pitch ready", { exact: true })).toHaveClass(/text-ok/);
+  const needs = page.getByRole("row").filter({ hasText: "Phoenix, AZ" });
+  await expect(needs.getByText("Needs facts", { exact: true })).toHaveClass(/text-flag/);
+  const draft = page.getByRole("row").filter({ hasText: "Untitled draft" });
+  await expect(draft.getByText("Pitch ready", { exact: true })).toHaveCount(0);
+  await expect(draft.getByText("Needs facts", { exact: true })).toHaveCount(0);
+});
+
 test("a draft page has the banner and marks the empty required field", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dev/mpcs?view=draft");

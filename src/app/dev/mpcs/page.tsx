@@ -32,6 +32,7 @@ const rows: MpcRow[] = [
     consentOnFile: false,
     interviewOnlyCount: 3,
     missing: ["years", "payTarget"],
+    pitchReady: false,
   },
   {
     id: "b",
@@ -46,6 +47,7 @@ const rows: MpcRow[] = [
     consentOnFile: true,
     interviewOnlyCount: 0,
     missing: [],
+    pitchReady: true,
   },
   {
     id: "c",
@@ -60,6 +62,7 @@ const rows: MpcRow[] = [
     consentOnFile: false,
     interviewOnlyCount: 0,
     missing: ["headlineRole", "years", "payTarget"],
+    pitchReady: false,
   },
 ];
 

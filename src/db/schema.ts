@@ -9,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -54,7 +55,7 @@ export const restrictionKind = pgEnum("restriction_kind", [
 ]);
 export const consentMethod = pgEnum("consent_method", ["verbal", "email", "signed_form"]);
 export const documentKind = pgEnum("document_kind", ["resume", "notes", "transcript"]);
-export const aiPurpose = pgEnum("ai_purpose", ["extraction", "find_more"]);
+export const aiPurpose = pgEnum("ai_purpose", ["extraction", "find_more", "sample_pitch"]);
 
 // The updated_at of the last Clerk event applied to a row. Older (out of order) events are skipped.
 const clerkUpdatedAt = () => timestamp("clerk_updated_at", { withTimezone: true });
@@ -168,6 +169,8 @@ export const mpcFacts = pgTable(
     ...timestamps,
   },
   (t) => [
+    // Target of same-agency foreign keys from saved bullets.
+    unique("mpc_facts_agency_id_unique").on(t.agencyId, t.id),
     sameAgencyMpc(t, "mpc_facts_mpc_fk"),
     sameAgencyMember(t, t.confirmedBy, "mpc_facts_confirmed_by_member_fk"),
     sameAgencyMember(t, t.editedBy, "mpc_facts_edited_by_member_fk"),
@@ -177,6 +180,33 @@ export const mpcFacts = pgTable(
       columns: [t.agencyId, t.sourceDocumentId],
       foreignColumns: [mpcDocuments.agencyId, mpcDocuments.id],
     }).onDelete("set null"),
+  ],
+);
+
+// The recruiter's preferred three pitch bullets ("Use these bullets"), one per position. A bullet
+// goes with its fact: deleting the fact cascades, and editing it clears the bullet (fact-actions).
+export const mpcSavedBullets = pgTable(
+  "mpc_saved_bullets",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    mpcId: mpcId(),
+    factId: uuid("fact_id").notNull(),
+    position: smallint("position").notNull(),
+    text: text("text").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    sameAgencyMpc(t, "mpc_saved_bullets_mpc_fk"),
+    foreignKey({
+      name: "mpc_saved_bullets_fact_fk",
+      columns: [t.agencyId, t.factId],
+      foreignColumns: [mpcFacts.agencyId, mpcFacts.id],
+    }).onDelete("cascade"),
+    sameAgencyMember(t, t.createdBy, "mpc_saved_bullets_created_by_member_fk"),
+    unique("mpc_saved_bullets_mpc_position_unique").on(t.mpcId, t.position),
+    check("mpc_saved_bullets_position_range", sql`${t.position} BETWEEN 1 AND 3`),
   ],
 );
 
