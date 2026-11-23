@@ -64,6 +64,23 @@ test("a draft page has the banner and marks the empty required field", async ({ 
   await expect(page.getByText("Required to activate")).toHaveCount(0);
 });
 
+for (const vp of [
+  { w: 390, h: 844, name: "phone" },
+  { w: 1440, h: 900, name: "desktop" },
+]) {
+  test(`Discard draft asks to confirm and fits on ${vp.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.w, height: vp.h });
+    await page.goto("/dev/mpcs?view=draft");
+    await page.getByRole("button", { name: "Discard draft" }).click();
+    await expect(page.getByText("Discard this draft? It leaves your MPC list and is never marketed.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Yes, discard" })).toBeVisible();
+    expect(await overflowReport(page)).toEqual(FITS);
+    await page.getByRole("button", { name: "Keep draft" }).click();
+    await expect(page.getByRole("button", { name: "Discard draft" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Yes, discard" })).toHaveCount(0);
+  });
+}
+
 test("a draft read-only view shows Not set for the missing role", async ({ page }) => {
   await page.goto("/dev/mpcs?view=draft-readonly");
   await expect(page.getByRole("heading", { name: "Untitled draft" })).toBeVisible();

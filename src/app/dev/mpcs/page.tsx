@@ -10,6 +10,7 @@ import { PauseAll } from "@/components/mpc/pause-all";
 import { ProfileForm } from "@/components/mpc/profile-form";
 import { ProfileReadOnly } from "@/components/mpc/profile-readonly";
 import { ComingNextSection, Section } from "@/components/mpc/section";
+import { StatusControls } from "@/components/mpc/status-controls";
 import type { MpcDetail, MpcRow } from "@/lib/mpc/queries";
 import { mpcTitle } from "@/lib/mpc/schema";
 
@@ -170,6 +171,11 @@ export default async function DevMpcsPage({ searchParams }: Props) {
               <ProfileReadOnly mpc={mpc} />
             )}
           </Section>
+          {view === "draft" && (
+            <Section title="Status">
+              <StatusControls mpcId={mpc.id} status={mpc.status} />
+            </Section>
+          )}
           <ComingNextSection title="Facts" />
           <Section title="Documents">
             <AddSources mpcId="a" documents={sampleDocs} />

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createDraftMpc, createMpc, pauseAllMpcs, reassignMpc, setMpcStatus, updateMpc } from "@/lib/mpc/actions";
 import { getMpc, listActiveMembers, listMpcs } from "@/lib/mpc/queries";
 import { mpcInput } from "@/lib/mpc/schema";
+import { isCheckViolation } from "@/db/errors";
 import type { Member } from "@/lib/auth";
 import { asOwner, createTestDb, seedAgencies, type TestDb } from "../helpers/test-db";
 import { asMember, membersOf, seedMembers, type MemberFixtures } from "../helpers/as-member";
@@ -414,12 +415,62 @@ describe("draft MPCs", () => {
     expect((await getMpcAs(f.recA, id))?.status).toBe("draft");
   });
 
-  test("an incomplete draft cannot be paused or removed", async () => {
+  test("an incomplete draft cannot be paused", async () => {
     const id = await mustDraft(f.recA);
-    const NO = { ok: false, error: "A draft cannot be paused or removed until it has a headline role and location." };
+    const NO = { ok: false, error: "A draft cannot be paused until it has a headline role and location." };
     expect(await setStatusAs(f.recA, id, "paused", "x")).toEqual(NO);
-    expect(await setStatusAs(f.recA, id, "removed")).toEqual(NO);
     expect((await getMpcAs(f.recA, id))?.status).toBe("draft");
+  });
+
+  test("discarding an incomplete draft removes it and hides it from the default list", async () => {
+    const id = await mustDraft(f.recA);
+    expect(await setStatusAs(f.recA, id, "removed")).toEqual({ ok: true });
+    const mpc = await getMpcAs(f.recA, id);
+    expect(mpc).toMatchObject({ status: "removed", headlineRole: null, location: null });
+    expect((await listMpcsAs(f.recA, { owner: "me" })).map((r) => r.id)).not.toContain(id);
+    expect((await listMpcsAs(f.recA, { owner: "me", status: "removed" })).map((r) => r.id)).toEqual([id]);
+    // It cannot come back as active without its required fields.
+    expect(await setStatusAs(f.recA, id, "active")).toEqual({
+      ok: false,
+      error: "Add the headline role and location before activating.",
+    });
+    expect(await setStatusAs(f.recA, id, "paused")).toMatchObject({ ok: false });
+  });
+
+  test("a teammate recruiter cannot discard a draft", async () => {
+    const id = await mustDraft(f.recA);
+    expect(await setStatusAs(f.recB, id, "removed")).toEqual({ ok: false, error: "You can only edit your own MPCs." });
+    expect((await getMpcAs(f.recA, id))?.status).toBe("draft");
+  });
+
+  test("database allows removed without role or location but not paused or active", async () => {
+    const insert = (status: "removed" | "paused" | "active") =>
+      asOwner(db, (tx) =>
+        tx.insert(mpcs).values({ agencyId: f.agency.id, ownerUserId: f.recA.userId, status }).returning({ id: mpcs.id }),
+      );
+    await expect(insert("removed")).resolves.toHaveLength(1);
+    await expect(insert("paused")).rejects.toThrow();
+  });
+
+  test("a whitespace-only headline role on a draft stays a draft with null stored", async () => {
+    const id = await mustDraft(f.recA);
+    const r = await updateMpcAs(f.recA, id, { headlineRole: "   ", location: "Phoenix, AZ" });
+    expect(r).toEqual({ ok: true });
+    const mpc = await getMpcAs(f.recA, id);
+    expect(mpc).toMatchObject({ status: "draft", headlineRole: null, location: "Phoenix, AZ" });
+  });
+
+  test("isCheckViolation recognizes the CHECK error the database raises", async () => {
+    const err = await asOwner(db, (tx) =>
+      tx.insert(mpcs).values({ agencyId: f.agency.id, ownerUserId: f.recA.userId, status: "active" }),
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).not.toBeNull();
+    expect(isCheckViolation(err)).toBe(true);
+    expect(isCheckViolation(new Error("other"))).toBe(false);
+    expect(isCheckViolation(undefined)).toBe(false);
   });
 
   test("an activated draft behaves like any other MPC", async () => {

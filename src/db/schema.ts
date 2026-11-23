@@ -128,7 +128,7 @@ export const mpcs = pgTable(
     // new enum value cannot be used as an enum literal until that transaction commits.
     check(
       "mpcs_required_unless_draft",
-      sql`${t.status}::text = 'draft' OR (${t.headlineRole} IS NOT NULL AND ${t.location} IS NOT NULL)`,
+      sql`${t.status}::text IN ('draft', 'removed') OR (${t.headlineRole} IS NOT NULL AND ${t.location} IS NOT NULL)`,
     ),
   ],
 );

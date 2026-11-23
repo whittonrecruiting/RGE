@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddSources, DocumentList } from "@/components/mpc/AddSources";
+import { BuildReview } from "@/components/mpc/BuildReview";
 import { StatusBadge } from "@/components/mpc/badges";
 import { ConsentCard } from "@/components/mpc/ConsentCard";
 import { FactList } from "@/components/mpc/FactList";
@@ -23,11 +24,12 @@ import { mpcTitle } from "@/lib/mpc/schema";
 
 export const metadata: Metadata = { title: "MPC" };
 
-type Props = { params: Promise<{ id: string }> };
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<{ review?: string }> };
 
-export default async function MpcPage({ params }: Props) {
+export default async function MpcPage({ params, searchParams }: Props) {
   const member = await requireMember();
   const { id } = await params;
+  const { review } = await searchParams;
   const mpc = await getMpc(member, id);
   if (!mpc) notFound();
 
@@ -87,6 +89,9 @@ export default async function MpcPage({ params }: Props) {
       </div>
 
       {mpc.status === "draft" && <DraftBanner />}
+
+      {/* Straight after Build profile: read the documents and open the review here, at the top. */}
+      {review === "1" && canEdit && documents.length > 0 && <BuildReview mpcId={mpc.id} />}
 
       {!canEdit && (
         <p className="rounded border border-line bg-card p-4 text-sm text-text-soft">

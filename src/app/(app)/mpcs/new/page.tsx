@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageTitle } from "@/components/shell/page-title";
-import { ProfileForm } from "@/components/mpc/profile-form";
+import { BuildProfile } from "@/components/mpc/BuildProfile";
 import { Section } from "@/components/mpc/section";
 import { requireMember } from "@/lib/auth";
 
@@ -19,14 +19,8 @@ export default async function NewMpcPage() {
           <PageTitle>Add MPC</PageTitle>
         </div>
       </div>
-      <Section title="Profile">
-        <ProfileForm />
-      </Section>
-      <Section title="Documents">
-        <p className="text-sm text-text-soft">
-          After you add the MPC, you can add a resume, notes or a transcript on its page and let the app propose the
-          profile and facts for your review.
-        </p>
+      <Section title="Start from documents">
+        <BuildProfile />
       </Section>
     </div>
   );

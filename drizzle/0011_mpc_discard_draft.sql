@@ -1,0 +1,2 @@
+ALTER TABLE "mpcs" DROP CONSTRAINT "mpcs_required_unless_draft";--> statement-breakpoint
+ALTER TABLE "mpcs" ADD CONSTRAINT "mpcs_required_unless_draft" CHECK ("mpcs"."status"::text IN ('draft', 'removed') OR ("mpcs"."headline_role" IS NOT NULL AND "mpcs"."location" IS NOT NULL));

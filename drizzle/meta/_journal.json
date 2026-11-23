@@ -78,6 +78,13 @@
       "when": 1795468079238,
       "tag": "0010_mpc_draft",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795468740680,
+      "tag": "0011_mpc_discard_draft",
+      "breakpoints": true
     }
   ]
 }

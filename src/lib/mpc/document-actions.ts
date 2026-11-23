@@ -3,10 +3,10 @@
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { mpcDocuments, mpcFacts, mpcRestrictions, mpcs } from "@/db/schema";
+import { isCheckViolation } from "@/db/errors";
 import { withAgency } from "@/db/with-agency";
 import { requireMember, type Member } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { extractText, MAX_FILE_BYTES } from "@/lib/docs/text";
 import {
   cleanFields,
   cleanRestrictions,
@@ -18,14 +18,14 @@ import {
 } from "@/lib/ai/extract-profile";
 import { getGenerate } from "@/lib/ai/models";
 import { meteredAiCall } from "@/lib/ai/usage";
-import { putFile } from "@/lib/storage";
 import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing";
 import { toSources } from "./document-queries";
+import { BAD_KIND, isDocKind, NO_INPUT, prepareFile, preparePaste, storeUpload } from "./document-input";
 import { cleanFactText } from "./fact-text";
 import { isUuid } from "./queries";
 import { mpcDraftInput, mpcInput, type MpcInput } from "./schema";
 
-export type DocKind = "resume" | "notes" | "transcript";
+export type { DocKind } from "./document-input";
 export type AddDocumentResult = { ok: true; documentId: string } | { ok: false; error: string };
 export type ExtractionResult =
   | { ok: true; draft: ProfileDraft; issuedAt: number; signature: string }
@@ -46,17 +46,12 @@ export type AcceptedExtraction = {
 
 const NOT_FOUND = "MPC not found.";
 const NOT_YOURS = "You can only edit your own MPCs.";
-const BAD_KIND = "Choose resume, notes or transcript.";
-const NO_INPUT = "Paste some text or choose a file.";
-const TOO_LONG = "That text is too long. Paste up to 200,000 characters.";
 const NOT_CONFIGURED = "Extraction is not configured yet.";
 const STALE = "This review is out of date. Run the extraction again.";
 const NO_DOCS = "Add a resume, notes or a transcript first.";
 const EXTRACT_FAILED = "The extraction did not finish. Try again.";
-const MAX_PASTED = 200_000;
-const MAX_FILENAME = 200;
+const CHANGED = "This MPC changed. Reload and try again.";
 
-const KINDS: readonly DocKind[] = ["resume", "notes", "transcript"];
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 
 /** Reads the MPC owner and checks the member may edit it. Returns an error string or null. */
@@ -80,34 +75,18 @@ export async function addDocument(mpcId: string, formData: FormData): Promise<Ad
   if (denied) return fail(denied);
 
   const kind = formData.get("kind");
-  if (typeof kind !== "string" || !KINDS.includes(kind as DocKind)) return fail(BAD_KIND);
+  if (!isDocKind(kind)) return fail(BAD_KIND);
 
   const file = formData.get("file");
   const pasted = formData.get("pastedText");
-  let filename: string;
-  let text: string;
-  let blobUrl: string | null = null;
-
-  if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_FILE_BYTES) return fail("File is larger than 10 MB.");
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const result = await extractText({ name: file.name, type: file.type, bytes });
-    if (!result.ok) return fail(result.error);
-    try {
-      blobUrl = (await putFile(file.name, bytes, file.type || "application/octet-stream")).url;
-    } catch (err) {
-      return fail(err instanceof Error ? err.message : "The file could not be saved. Try again.");
-    }
-    filename = file.name.slice(0, MAX_FILENAME);
-    text = result.text;
-  } else if (typeof pasted === "string" && pasted.trim() !== "") {
-    if (pasted.length > MAX_PASTED) return fail(TOO_LONG);
-    const name = formData.get("name");
-    filename = (typeof name === "string" && name.trim() !== "" ? name.trim() : `Pasted ${kind}`).slice(0, MAX_FILENAME);
-    text = pasted;
-  } else {
-    return fail(NO_INPUT);
-  }
+  let prepared;
+  if (file instanceof File && file.size > 0) prepared = await prepareFile(kind, file);
+  else if (typeof pasted === "string" && pasted.trim() !== "") prepared = preparePaste(kind, pasted, formData.get("name"));
+  else return fail(NO_INPUT);
+  if (!prepared.ok) return fail(prepared.error);
+  const source = prepared.source;
+  const stored = await storeUpload(source);
+  if (!stored.ok) return fail(stored.error);
 
   const [row] = await withAgency(member.agencyId, (tx) =>
     tx
@@ -115,10 +94,10 @@ export async function addDocument(mpcId: string, formData: FormData): Promise<Ad
       .values({
         agencyId: member.agencyId,
         mpcId,
-        kind: kind as DocKind,
-        blobUrl,
-        filename,
-        text,
+        kind: source.kind,
+        blobUrl: stored.blobUrl,
+        filename: source.filename,
+        text: source.text,
         createdBy: member.userId,
       })
       .returning({ id: mpcDocuments.id }),
@@ -213,88 +192,96 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
   });
   const restrictions = restrictionIndexes.map((i) => draftRestrictions[i]);
 
-  const result = await withAgency(member.agencyId, async (tx): Promise<ApplyResult> => {
-    const [current] = await tx.select().from(mpcs).where(eq(mpcs.id, mpcId));
-    if (!current) return fail(NOT_FOUND);
+  let result: ApplyResult;
+  try {
+    result = await withAgency(member.agencyId, async (tx): Promise<ApplyResult> => {
+      // Locked so a concurrent status change cannot slip between this read and the writes below.
+      const [current] = await tx.select().from(mpcs).where(eq(mpcs.id, mpcId)).for("update");
+      if (!current) return fail(NOT_FOUND);
 
-    // Validate the merged profile before any write. A draft may still lack headline role and location.
-    const isDraft = current.status === "draft";
-    let merged: ReturnType<typeof mpcDraftInput.parse> | null = null;
-    if (Object.keys(fields).length > 0) {
-      const parsed = (isDraft ? mpcDraftInput : mpcInput).safeParse({
-        headlineRole: current.headlineRole,
-        location: current.location,
-        yearsExperience: current.yearsExperience,
-        seniority: current.seniority,
-        specialtyTags: current.specialtyTags,
-        workMode: current.workMode,
-        employerType: current.employerType,
-        targetCities: current.targetCities,
-        payFloor: current.payFloor,
-        payFloorStrict: current.payFloorStrict,
-        payTarget: current.payTarget,
-        overlapPriority: current.overlapPriority,
-        ...fields,
-      });
-      if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Check the fields and try again.");
-      merged = parsed.data;
-    }
+      // Validate the merged profile before any write. A draft may still lack headline role and location.
+      const isDraft = current.status === "draft";
+      let merged: ReturnType<typeof mpcDraftInput.parse> | null = null;
+      if (Object.keys(fields).length > 0) {
+        const parsed = (isDraft ? mpcDraftInput : mpcInput).safeParse({
+          headlineRole: current.headlineRole,
+          location: current.location,
+          yearsExperience: current.yearsExperience,
+          seniority: current.seniority,
+          specialtyTags: current.specialtyTags,
+          workMode: current.workMode,
+          employerType: current.employerType,
+          targetCities: current.targetCities,
+          payFloor: current.payFloor,
+          payFloorStrict: current.payFloorStrict,
+          payTarget: current.payTarget,
+          overlapPriority: current.overlapPriority,
+          ...fields,
+        });
+        if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Check the fields and try again.");
+        merged = parsed.data;
+      }
 
-    // A draft that now has both headline role and location becomes active in this same transaction.
-    const activated = isDraft && merged !== null && merged.headlineRole !== null && merged.location !== null;
-    if (merged) {
-      await tx
-        .update(mpcs)
-        .set({ ...merged, ...(activated ? { status: "active" as const } : {}), updatedAt: new Date() })
-        .where(eq(mpcs.id, mpcId));
-    }
+      // A draft that now has both headline role and location becomes active in this same transaction.
+      const activated = isDraft && merged !== null && merged.headlineRole !== null && merged.location !== null;
+      if (merged) {
+        await tx
+          .update(mpcs)
+          .set({ ...merged, ...(activated ? { status: "active" as const } : {}), updatedAt: new Date() })
+          .where(eq(mpcs.id, mpcId));
+      }
 
-    if (facts.length > 0) {
-      const have = new Set(
-        (await tx.select({ text: mpcFacts.text }).from(mpcFacts).where(eq(mpcFacts.mpcId, mpcId))).map((r) =>
-          r.text.trim().toLowerCase(),
-        ),
-      );
-      const fresh = facts.filter((f) => {
-        const key = f.text.toLowerCase();
-        if (have.has(key)) return false;
-        have.add(key);
-        return true;
-      });
-      if (fresh.length > 0) {
-        await tx.insert(mpcFacts).values(
-          fresh.map((f) => ({
-            agencyId: member.agencyId,
-            mpcId,
-            text: f.text,
-            sourceKind: f.sourceKind,
-            sourceRef: f.sourceRef,
-            sourceDocumentId: documentIdOf.get(f.sourceRef) ?? null,
-            sourceQuote: f.sourceQuote,
-            status: f.sourceKind === "resume" ? ("usable" as const) : ("interview_only" as const),
-          })),
+      if (facts.length > 0) {
+        const have = new Set(
+          (await tx.select({ text: mpcFacts.text }).from(mpcFacts).where(eq(mpcFacts.mpcId, mpcId))).map((r) =>
+            r.text.trim().toLowerCase(),
+          ),
         );
+        const fresh = facts.filter((f) => {
+          const key = f.text.toLowerCase();
+          if (have.has(key)) return false;
+          have.add(key);
+          return true;
+        });
+        if (fresh.length > 0) {
+          await tx.insert(mpcFacts).values(
+            fresh.map((f) => ({
+              agencyId: member.agencyId,
+              mpcId,
+              text: f.text,
+              sourceKind: f.sourceKind,
+              sourceRef: f.sourceRef,
+              sourceDocumentId: documentIdOf.get(f.sourceRef) ?? null,
+              sourceQuote: f.sourceQuote,
+              status: f.sourceKind === "resume" ? ("usable" as const) : ("interview_only" as const),
+            })),
+          );
+        }
       }
-    }
 
-    if (restrictions.length > 0) {
-      const have = new Set(
-        (await tx.select({ kind: mpcRestrictions.kind, value: mpcRestrictions.value }).from(mpcRestrictions).where(eq(mpcRestrictions.mpcId, mpcId))).map(
-          (r) => `${r.kind}:${r.value.toLowerCase()}`,
-        ),
-      );
-      const fresh = restrictions.filter((r) => {
-        const key = `${r.kind}:${r.value.toLowerCase()}`;
-        if (have.has(key)) return false;
-        have.add(key);
-        return true;
-      });
-      if (fresh.length > 0) {
-        await tx.insert(mpcRestrictions).values(fresh.map((r) => ({ agencyId: member.agencyId, mpcId, kind: r.kind, value: r.value })));
+      if (restrictions.length > 0) {
+        const have = new Set(
+          (await tx.select({ kind: mpcRestrictions.kind, value: mpcRestrictions.value }).from(mpcRestrictions).where(eq(mpcRestrictions.mpcId, mpcId))).map(
+            (r) => `${r.kind}:${r.value.toLowerCase()}`,
+          ),
+        );
+        const fresh = restrictions.filter((r) => {
+          const key = `${r.kind}:${r.value.toLowerCase()}`;
+          if (have.has(key)) return false;
+          have.add(key);
+          return true;
+        });
+        if (fresh.length > 0) {
+          await tx.insert(mpcRestrictions).values(fresh.map((r) => ({ agencyId: member.agencyId, mpcId, kind: r.kind, value: r.value })));
+        }
       }
-    }
-    return activated ? { ok: true, activated: true } : { ok: true };
-  });
+      return activated ? { ok: true, activated: true } : { ok: true };
+    });
+  } catch (err) {
+    // The database refused a status without role and location: the row changed under us.
+    if (isCheckViolation(err)) return fail(CHANGED);
+    throw err;
+  }
   if (result.ok) {
     revalidatePath("/mpcs");
     revalidatePath(`/mpcs/${mpcId}`);

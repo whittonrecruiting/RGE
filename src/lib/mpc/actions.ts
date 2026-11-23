@@ -3,6 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { memberships, mpcs } from "@/db/schema";
+import { isCheckViolation } from "@/db/errors";
 import { withAgency } from "@/db/with-agency";
 import { requireMember } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -30,7 +31,8 @@ const NO_AGENCY_PAUSE = "You do not have permission to pause the whole agency.";
 const NOT_ACTIVE_MEMBER = "Choose an active member of your team.";
 const PLACED = "A placed MPC cannot be changed here.";
 const DRAFT_INCOMPLETE = "Add the headline role and location before activating.";
-const DRAFT_NO_PAUSE = "A draft cannot be paused or removed until it has a headline role and location.";
+const DRAFT_NO_PAUSE = "A draft cannot be paused until it has a headline role and location.";
+const CHANGED = "This MPC changed. Reload and try again.";
 const MAX_REASON = 500;
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -101,28 +103,37 @@ export async function createDraftMpc(): Promise<CreateResult> {
 export async function updateMpc(id: string, input: MpcInput | MpcDraftInput): Promise<UpdateResult> {
   const member = await requireMember();
   if (!isUuid(id)) return fail(NOT_FOUND);
-  const result = await withAgency(member.agencyId, async (tx): Promise<UpdateResult> => {
-    const [current] = await tx
-      .select({ ownerUserId: mpcs.ownerUserId, status: mpcs.status })
-      .from(mpcs)
-      .where(eq(mpcs.id, id));
-    if (!current) return fail(NOT_FOUND);
-    if (!can(member, "mpc.edit", { ownerUserId: current.ownerUserId })) return fail(NOT_YOURS);
-    if (current.status !== "draft") {
-      const parsed = parseInput(input as MpcInput);
+  let result: UpdateResult;
+  try {
+    result = await withAgency(member.agencyId, async (tx): Promise<UpdateResult> => {
+      // Locked so a concurrent status change cannot slip between this read and the write below.
+      const [current] = await tx
+        .select({ ownerUserId: mpcs.ownerUserId, status: mpcs.status })
+        .from(mpcs)
+        .where(eq(mpcs.id, id))
+        .for("update");
+      if (!current) return fail(NOT_FOUND);
+      if (!can(member, "mpc.edit", { ownerUserId: current.ownerUserId })) return fail(NOT_YOURS);
+      if (current.status !== "draft") {
+        const parsed = parseInput(input as MpcInput);
+        if (!parsed.ok) return fail(parsed.error);
+        await tx.update(mpcs).set({ ...parsed.data, updatedAt: new Date() }).where(eq(mpcs.id, id));
+        return { ok: true };
+      }
+      const parsed = parseDraftInput(input);
       if (!parsed.ok) return fail(parsed.error);
-      await tx.update(mpcs).set({ ...parsed.data, updatedAt: new Date() }).where(eq(mpcs.id, id));
-      return { ok: true };
-    }
-    const parsed = parseDraftInput(input);
-    if (!parsed.ok) return fail(parsed.error);
-    const activate = isComplete(parsed.data);
-    await tx
-      .update(mpcs)
-      .set({ ...parsed.data, ...(activate ? { status: "active" as const } : {}), updatedAt: new Date() })
-      .where(eq(mpcs.id, id));
-    return activate ? { ok: true, activated: true } : { ok: true };
-  });
+      const activate = isComplete(parsed.data);
+      await tx
+        .update(mpcs)
+        .set({ ...parsed.data, ...(activate ? { status: "active" as const } : {}), updatedAt: new Date() })
+        .where(eq(mpcs.id, id));
+      return activate ? { ok: true, activated: true } : { ok: true };
+    });
+  } catch (err) {
+    // The database refused a status without role and location: the row changed under us.
+    if (isCheckViolation(err)) return fail(CHANGED);
+    throw err;
+  }
   if (result.ok) revalidate(id);
   return result;
 }
@@ -142,12 +153,14 @@ export async function setMpcStatus(id: string, status: SettableStatus, reason?: 
         location: mpcs.location,
       })
       .from(mpcs)
-      .where(eq(mpcs.id, id));
+      .where(eq(mpcs.id, id))
+      .for("update");
     if (!current) return fail(NOT_FOUND);
     if (!can(member, "mpc.edit", { ownerUserId: current.ownerUserId })) return fail(NOT_YOURS);
     if (current.status === "placed") return fail(PLACED);
-    // Only a draft may lack these; the database refuses any other status without them.
-    if (!isComplete(current)) return fail(status === "active" ? DRAFT_INCOMPLETE : DRAFT_NO_PAUSE);
+    // Only a draft (or a discarded one, status removed) may lack these. Discarding a draft is allowed;
+    // the database refuses active or paused without them.
+    if (!isComplete(current) && status !== "removed") return fail(status === "active" ? DRAFT_INCOMPLETE : DRAFT_NO_PAUSE);
     await tx
       .update(mpcs)
       .set({ status, pauseReason: status === "paused" ? cleanReason(reason) : null, updatedAt: new Date() })
