@@ -90,8 +90,9 @@ export default async function MpcPage({ params, searchParams }: Props) {
 
       {mpc.status === "draft" && <DraftBanner />}
 
-      {/* Straight after Build profile: read the documents and open the review here, at the top. */}
-      {review === "1" && canEdit && documents.length > 0 && <BuildReview mpcId={mpc.id} />}
+      {/* Straight after Build profile: read the documents and open the review here, at the top. Always
+          mounted for editors so a later revalidation (no ?review) cannot close an open review. */}
+      {canEdit && <BuildReview mpcId={mpc.id} autoStart={review === "1" && documents.length > 0} />}
 
       {!canEdit && (
         <p className="rounded border border-line bg-card p-4 text-sm text-text-soft">

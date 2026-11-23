@@ -469,6 +469,12 @@ describe("draft MPCs", () => {
     );
     expect(err).not.toBeNull();
     expect(isCheckViolation(err)).toBe(true);
+    expect(isCheckViolation(err, "mpcs_required_unless_draft")).toBe(true);
+    // The driver names the constraint, so another constraint name does not match.
+    expect(isCheckViolation(err, "some_other_check")).toBe(false);
+    expect(isCheckViolation({ code: "23514", constraint: "some_other_check" }, "mpcs_required_unless_draft")).toBe(false);
+    expect(isCheckViolation({ cause: { code: "23514" } }, "mpcs_required_unless_draft")).toBe(true);
+    expect(isCheckViolation({ code: "23505", constraint: "mpcs_required_unless_draft" })).toBe(false);
     expect(isCheckViolation(new Error("other"))).toBe(false);
     expect(isCheckViolation(undefined)).toBe(false);
   });

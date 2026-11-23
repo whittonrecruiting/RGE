@@ -131,7 +131,7 @@ export async function updateMpc(id: string, input: MpcInput | MpcDraftInput): Pr
     });
   } catch (err) {
     // The database refused a status without role and location: the row changed under us.
-    if (isCheckViolation(err)) return fail(CHANGED);
+    if (isCheckViolation(err, "mpcs_required_unless_draft")) return fail(CHANGED);
     throw err;
   }
   if (result.ok) revalidate(id);

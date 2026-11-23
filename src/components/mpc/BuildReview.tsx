@@ -13,15 +13,23 @@ type Draft = { draft: ProfileDraft; issuedAt: number; signature: string };
  * top of the page. The query is dropped from the address first, so a reload does not run (and pay
  * for) the extraction again. If it fails, the draft and documents are already saved; say so and
  * offer to try again.
+ *
+ * Render it on every MPC page the member can edit. Whether it runs is decided once, from autoStart on
+ * the first render: later server renders (any action that revalidates the page) no longer carry
+ * ?review, and must not close a review that is open or already paid for.
  */
 export function BuildReview({
   mpcId,
+  autoStart,
   extract = runExtraction,
 }: {
   mpcId: string;
+  /** True on the page load straight after Build profile. Only the first render's value counts. */
+  autoStart: boolean;
   /** Dev layout checks pass a stand-in; the app always uses runExtraction. */
   extract?: (mpcId: string) => Promise<ExtractionResult>;
 }) {
+  const [active] = useState(autoStart);
   const started = useRef(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +51,14 @@ export function BuildReview({
 
   useEffect(() => {
     // Once per page load, even when React runs effects twice in development.
-    if (started.current) return;
+    if (!active || started.current) return;
     started.current = true;
     window.history.replaceState(window.history.state, "", window.location.pathname);
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (done) return null;
+  if (!active || done) return null;
   if (draft) {
     return (
       <ExtractionReview

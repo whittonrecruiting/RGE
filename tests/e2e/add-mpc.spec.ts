@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { FITS, overflowReport } from "./fit";
 
-// Runs against /dev/add-mpc: the sources-first Add MPC screen with no auth.
+// Runs against /dev/add-mpc (the sources-first Add MPC screen) and /dev/build-review (the step after
+// Build profile, with a stand-in extraction), both with no auth.
 
 const LONG_NAME = `jordan-example-resume-with-a-very-long-file-name-${"x".repeat(80)}.pdf`;
 
@@ -34,7 +35,7 @@ for (const vp of [
 
   test(`the extraction failure after Build profile fits and offers a retry on ${vp.name}`, async ({ page }) => {
     await page.setViewportSize({ width: vp.w, height: vp.h });
-    await page.goto("/dev/add-mpc?review=fail");
+    await page.goto("/dev/build-review?review=fail");
     await expect(
       page.getByText(
         "We saved this draft and its documents, but could not build the profile: You've hit the hourly limit for AI lookups. Try again later.",
@@ -66,4 +67,18 @@ test("files get a kind by type and Paste text adds a notes box", async ({ page }
 
   await page.getByRole("button", { name: "Remove" }).first().click();
   await expect(kinds).toHaveCount(2);
+});
+
+test("an open review survives a server re-render that no longer has ?review", async ({ page }) => {
+  await page.goto("/dev/build-review?review=ok");
+  const review = page.getByRole("heading", { name: "Review what was found" });
+  await expect(review).toBeVisible();
+  await expect(page.getByText("Server render: review=ok")).toBeVisible();
+  // The query is gone, so a reload would not run the extraction again.
+  await expect(page).toHaveURL(/\/dev\/build-review$/);
+  // Any server action that revalidates the page re-renders it without ?review.
+  await page.getByRole("button", { name: "Re-render without review" }).click();
+  await expect(page.getByText("Server render: no review")).toBeVisible();
+  await expect(review).toBeVisible();
+  await expect(page.getByText("Led discovery on a $120M breach of contract matter")).toBeVisible();
 });
