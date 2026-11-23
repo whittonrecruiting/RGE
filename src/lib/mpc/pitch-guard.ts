@@ -44,14 +44,17 @@ function figureMin(key: string): number {
   return 10 ** Math.max(0, count - 1);
 }
 
-const MAGNITUDES: { pattern: string; min: number; dollars?: true }[] = [
-  { pattern: String.raw`multi-?trillion`, min: 2e12 },
-  { pattern: String.raw`multi-?billion`, min: 2e9 },
-  { pattern: String.raw`multi-?million`, min: 2e6 },
-  { pattern: String.raw`trillion-dollar`, min: 1e12, dollars: true },
-  { pattern: String.raw`billion-dollar`, min: 1e9, dollars: true },
-  { pattern: String.raw`million-dollar`, min: 1e6, dollars: true },
-  { pattern: N_FIGURE, min: 0 },
+// money: a size of money, backed only by a $ figure. Otherwise a count, backed only by a unitless
+// figure; a count magnitude next to a currency sign or word ("$ millions", "billions of dollars")
+// becomes money (see figuresIn).
+const MAGNITUDES: { pattern: string; min: number; money?: true }[] = [
+  { pattern: String.raw`multi-?trillion`, min: 2e12, money: true },
+  { pattern: String.raw`multi-?billion`, min: 2e9, money: true },
+  { pattern: String.raw`multi-?million`, min: 2e6, money: true },
+  { pattern: String.raw`trillion-dollar`, min: 1e12, money: true },
+  { pattern: String.raw`billion-dollar`, min: 1e9, money: true },
+  { pattern: String.raw`million-dollar`, min: 1e6, money: true },
+  { pattern: N_FIGURE, min: 0, money: true },
   { pattern: String.raw`trillions`, min: 2e12 },
   { pattern: String.raw`billions`, min: 2e9 },
   { pattern: String.raw`millions`, min: 2e6 },
@@ -86,7 +89,7 @@ const RAISE_BEFORE = /\b(over|more than|nearly|almost|upwards of|at least|in exc
 type Unit = "$" | "%" | null;
 type Figure =
   | { kind: "number"; raw: string; value: number; unit: Unit; raised: boolean }
-  | { kind: "magnitude"; raw: string; min: number; dollars: boolean };
+  | { kind: "magnitude"; raw: string; min: number; money: boolean };
 
 const unitOf = (cur: string | undefined, after: string | undefined): Unit => {
   const a = (after ?? "").trim().toLowerCase();
@@ -107,7 +110,10 @@ function figuresIn(text: string): Figure[] {
       // "hundreds of" and "in the hundreds" are the same claim.
       const norm = key.replace(/\s+/g, " ").replace(/ of$/, "");
       const min = def.pattern === N_FIGURE ? figureMin(norm) : def.min;
-      out.push({ kind: "magnitude", raw: norm, min, dollars: def.dollars === true });
+      const nextToCurrency =
+        /\$\s*$/.test(text.slice(Math.max(0, at - 3), at)) ||
+        /^\s+(?:of\s+|in\s+)?(?:dollars|usd)\b/i.test(text.slice(at + g.mag.length));
+      out.push({ kind: "magnitude", raw: norm, min, money: def.money === true || nextToCurrency });
       continue;
     }
     let value: number;
@@ -141,7 +147,8 @@ const sameNumber = (a: number, b: number) => Math.abs(a - b) <= Math.max(Math.ab
 /**
  * True when the source backs the figure. A number needs the same value, in the same unit when it
  * has one ($ or %), and a raising qualifier (40+, over 40) needs one in the source too. A magnitude word
- * needs the same wording or a source figure at least that large (in dollars for "million-dollar").
+ * needs the same wording, or a source figure at least that large of the same kind: a $ figure for
+ * a money magnitude (seven-figure, million-dollar), a unitless one for a count (thousands of claims).
  */
 function backed(f: Figure, source: Figure[]): boolean {
   if (f.kind === "number") {
@@ -158,7 +165,7 @@ function backed(f: Figure, source: Figure[]): boolean {
   return source.some((s) =>
     s.kind === "magnitude"
       ? s.raw === f.raw
-      : s.unit !== "%" && s.value >= f.min && (!f.dollars || s.unit === "$"),
+      : s.value >= f.min && (f.money ? s.unit === "$" : s.unit === null),
   );
 }
 

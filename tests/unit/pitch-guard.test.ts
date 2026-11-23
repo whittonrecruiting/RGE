@@ -119,6 +119,20 @@ describe("number guard: inflation the figure match alone would miss", () => {
     bad("Raised $ 120M for the fund", "Raised 120M for the fund");
   });
 
+  test("count magnitudes need unitless figures; money magnitudes need $ figures", () => {
+    const FACT = "Led a team of 12 on 40 trials worth $120M";
+    bad("Handled thousands of claims", FACT);
+    ok("Handled thousands of claims", "Handled 4,500 claims");
+    bad("Supervised hundreds of attorneys", FACT);
+    ok("Led a nine-figure portfolio", FACT);
+    ok("Tried dozens of cases", FACT);
+    ok("Managed a million-dollar budget", "Managed a $1.2M budget");
+    bad("Managed a million-dollar budget", "Reached 1.2 million users");
+    bad("Reached millions of users nationwide", "Recovered $5M for clients");
+    ok("Recovered millions of dollars for clients", "Recovered $5M for clients");
+    bad("Recovered millions of dollars for clients", "Served 5 million clients");
+  });
+
   test("percent and currency are units", () => {
     bad("Cut claim costs by 45%", "Supervised 45 attorneys on claims");
     ok("Cut claim costs by 45%", "Cut claim costs by 45 percent");
