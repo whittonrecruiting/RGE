@@ -174,12 +174,12 @@ describe("setMemberRole", () => {
 });
 
 describe("revalidation", () => {
-  test("every successful mutation revalidates /team; failures do not", async () => {
+  test("every successful mutation revalidates /settings; failures do not", async () => {
     await inviteMemberAs(f.owner, "new@example.test", "recruiter");
     await setMemberRoleAs(f.owner, await membershipId(f.recA.userId), "admin");
     await removeMemberAs(f.owner, await membershipId(f.recB.userId));
     expect(revalidatePath).toHaveBeenCalledTimes(3);
-    expect(revalidatePath).toHaveBeenCalledWith("/team");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings");
     vi.mocked(revalidatePath).mockClear();
     await inviteMemberAs(f.recA, "x@example.test", "recruiter");
     await setMemberRoleAs(f.admin, await membershipId(f.owner.userId), "admin");
@@ -224,7 +224,7 @@ describe("local failure after Clerk succeeded", () => {
     expect((await rowOf(f.recA.userId)).status).toBe("removed");
     const [moved] = await withAgency(f.agency.id, (tx) => tx.select().from(mpcs));
     expect(moved.ownerUserId).toBe(f.owner.userId);
-    expect(revalidatePath).toHaveBeenCalledWith("/team");
+    expect(revalidatePath).toHaveBeenCalledWith("/settings");
   });
 
   test("a Clerk error other than not-found still fails without touching local state", async () => {

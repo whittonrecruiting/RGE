@@ -14,7 +14,7 @@ const viewports = [
 const pages: { path: string; primary: string }[] = [
   { path: "/mpcs", primary: "Add MPC" },
   { path: `/mpcs/${process.env.E2E_MPC_ID ?? "seeded"}`, primary: "Save changes" },
-  { path: "/team", primary: "Send invite" },
+  { path: "/settings#team", primary: "Send invite" },
   { path: "/settings", primary: "Save settings" },
 ];
 

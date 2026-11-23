@@ -78,7 +78,7 @@ export async function inviteMember(email: string, role: Role): Promise<TeamResul
     console.error("inviteMember: Clerk call failed", errorSummary(err));
     return fail(CLERK_FAILED);
   }
-  revalidatePath("/team");
+  revalidatePath("/settings");
   return { ok: true };
 }
 
@@ -111,7 +111,7 @@ export async function setMemberRole(membershipId: string, role: Role): Promise<T
     console.error("setMemberRole: local update failed after Clerk succeeded", errorSummary(err));
     return fail(LOCAL_FAILED);
   }
-  revalidatePath("/team");
+  revalidatePath("/settings");
   return { ok: true };
 }
 
@@ -162,6 +162,6 @@ export async function removeMember(membershipId: string): Promise<TeamResult> {
     console.error("removeMember: local step failed after Clerk succeeded", errorSummary(err));
     return fail(REMOVE_LOCAL_FAILED);
   }
-  revalidatePath("/team");
+  revalidatePath("/settings");
   return { ok: true };
 }

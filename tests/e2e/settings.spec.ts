@@ -35,3 +35,25 @@ test("choosing Auto shows the warning and needs a confirm", async ({ page }) => 
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Emails will send without your review." }).last()).toBeVisible();
 });
+
+test("Team is the first section and the rest follow in order", async ({ page }) => {
+  await page.goto("/dev/settings");
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText([
+    "Team",
+    "Invite a teammate",
+    "Agency",
+    "Rules",
+    "CRM",
+    "Templates",
+    "Approvals",
+  ]);
+  await expect(page.locator("#team")).toBeVisible();
+});
+
+test("read-only view lists the team without invite or member actions", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dev/settings?view=readonly");
+  await expect(page.locator("#team").getByRole("cell", { name: "Sample Admin" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send invite" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+});

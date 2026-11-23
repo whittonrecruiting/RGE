@@ -33,12 +33,12 @@ test("theme toggle switches to light and is remembered in a cookie", async ({ pa
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 
-test("phone menu sheet lists the remaining sections", async ({ page }) => {
+test("phone bottom bar has exactly five tabs and no Menu button", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dev/shell");
-  await page.getByRole("button", { name: "Menu" }).click();
-  const sheet = page.getByRole("dialog", { name: "More navigation" });
-  for (const name of ["Opt-outs", "Dashboard", "Team", "Settings"]) {
-    await expect(sheet.getByRole("link", { name })).toBeVisible();
-  }
+  const bar = page.getByRole("navigation", { name: "Primary" }).last();
+  await expect(bar.getByRole("link")).toHaveText(["Approvals", "MPCs", "Pipeline", "Campaign", "Settings"]);
+  for (const link of await bar.getByRole("link").all()) await expect(link).toBeVisible();
+  await expect(page.getByRole("button", { name: "Menu" })).toHaveCount(0);
+  expect(await overflowReport(page)).toEqual(FITS);
 });
