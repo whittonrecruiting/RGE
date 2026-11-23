@@ -133,6 +133,13 @@ describe("number guard: inflation the figure match alone would miss", () => {
     bad("Recovered millions of dollars for clients", "Served 5 million clients");
   });
 
+  test("a magnitude backs the same magnitude only in the same class", () => {
+    bad("Served millions of users", "Recovered millions of dollars for clients");
+    bad("Recovered millions of dollars for clients", "Served millions of users");
+    ok("Served millions of users", "Served millions of users nationwide");
+    ok("Recovered millions of dollars", "Recovered millions of dollars for clients");
+  });
+
   test("percent and currency are units", () => {
     bad("Cut claim costs by 45%", "Supervised 45 attorneys on claims");
     ok("Cut claim costs by 45%", "Cut claim costs by 45 percent");

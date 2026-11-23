@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { sql } from "drizzle-orm";
 import { aiUsage, agencySettings } from "@/db/schema";
 import { createDraftMpc, createMpc } from "@/lib/mpc/actions";
-import { deleteFact, updateFact } from "@/lib/mpc/fact-actions";
+import { deleteFact, setRestrictions, updateFact } from "@/lib/mpc/fact-actions";
 import { clearSavedBullets, generateSamplePitch, saveBullets } from "@/lib/mpc/sample-pitch-action";
 import { getPitchReadiness, listMpcs, listSavedBullets } from "@/lib/mpc/queries";
 import { MODELS, setTestGenerate } from "@/lib/ai/models";
@@ -162,6 +162,43 @@ describe("generateSamplePitch", () => {
     const gen = fakeGenerate({ background: BACKGROUND, bullets: [] });
     setTestGenerate(gen);
     expect(await generateAs(f.recA, d.id)).toEqual({ ok: false, error: "Activate this MPC before previewing a pitch." });
+    expect(gen.calls).toHaveLength(0);
+    expect(await usageRows()).toHaveLength(0);
+  });
+
+  test("with no strong facts and nothing saved, it says so before any AI call", async () => {
+    const id = await newMpc();
+    await seedFact(db, { agencyId: f.agency.id, mpcId: id, text: "Wants to leave a difficult partner", status: "interview_only" });
+    const gen = fakeGenerate({ background: BACKGROUND, bullets: [] });
+    setTestGenerate(gen);
+    expect(await generateAs(f.recA, id)).toEqual({ ok: false, error: "No strong facts yet. Confirm a note or run Find more." });
+    expect(gen.calls).toHaveLength(0);
+    expect(await usageRows()).toHaveLength(0);
+  });
+
+  test("a background phrase is not rendered when no bullet facts were used", async () => {
+    const id = await newMpc();
+    const b = await seedFact(db, { agencyId: f.agency.id, mpcId: id, text: FACTS.b, status: "usable" });
+    setTestGenerate(
+      fakeGenerate({ background: BACKGROUND, bullets: [{ factId: b.id, text: "Led discovery on a $500M bad faith matter" }] }),
+    );
+    const r = await generateAs(f.recA, id);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.pitch.bullets).toEqual([]);
+    expect(r.pitch.body).not.toContain(BACKGROUND);
+    expect(r.pitch.body).toContain("whose [specific background] could be relevant");
+    expect(r.pitch.warnings).toContain("The background phrase did not pass the checks. Regenerate to try again.");
+  });
+
+  test("removed and placed MPCs are refused before any AI call", async () => {
+    const ids = await mpcWithFacts();
+    const gen = fakeGenerate({ background: BACKGROUND, bullets: good(ids) });
+    setTestGenerate(gen);
+    await asOwner(db, (tx) => tx.execute(sql`update mpcs set status = 'removed' where id = ${ids.id}`));
+    expect(await generateAs(f.recA, ids.id)).toEqual({ ok: false, error: "Restore this MPC before previewing a pitch." });
+    await asOwner(db, (tx) => tx.execute(sql`update mpcs set status = 'placed' where id = ${ids.id}`));
+    expect(await generateAs(f.recA, ids.id)).toEqual({ ok: false, error: "This MPC is placed." });
     expect(gen.calls).toHaveLength(0);
     expect(await usageRows()).toHaveLength(0);
   });
@@ -334,6 +371,21 @@ describe("saved bullets", () => {
     expect((await savedOf(ids.id)).map((b) => b.factId)).toEqual([ids.a, ids.c]);
     expect(await asMember(f.recA, () => deleteFact(ids.c))).toEqual({ ok: true });
     expect((await savedOf(ids.id)).map((b) => b.factId)).toEqual([ids.a]);
+  });
+
+  test("setRestrictions removes saved bullets that use a never-say or confidential term", async () => {
+    const ids = await savedMpc();
+    expect(
+      await asMember(f.recA, () =>
+        setRestrictions(ids.id, [
+          { kind: "never_say", value: "bad faith" },
+          { kind: "excluded_company", value: "national carriers" },
+        ]),
+      ),
+    ).toEqual({ ok: true });
+    expect((await savedOf(ids.id)).map((b) => b.factId)).toEqual([ids.a, ids.c]);
+    expect(await asMember(f.recA, () => setRestrictions(ids.id, [{ kind: "confidential", value: "Coverage" }]))).toEqual({ ok: true });
+    expect((await savedOf(ids.id)).map((b) => b.factId)).toEqual([ids.c]);
   });
 
   test("clearSavedBullets removes them all", async () => {

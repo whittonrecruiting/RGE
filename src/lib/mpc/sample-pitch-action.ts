@@ -34,6 +34,8 @@ export type SamplePitchOptions = { swapPosition?: 1 | 2 | 3; keep?: PitchBullet[
 const NOT_FOUND = "MPC not found.";
 const NOT_YOURS = "You can only edit your own MPCs.";
 const ACTIVATE = "Activate this MPC before previewing a pitch.";
+const RESTORE = "Restore this MPC before previewing a pitch.";
+const PLACED = "This MPC is placed.";
 const FAILED = "The sample pitch did not finish. Try again.";
 const NO_SWAP = "No other strong fact to swap in. Confirm a note or run Find more.";
 const BAD_SWAP = "Choose bullet 1, 2 or 3 to swap.";
@@ -101,6 +103,8 @@ export async function generateSamplePitch(mpcId: string, opts: SamplePitchOption
   });
   if ("error" in loaded) return fail(loaded.error);
   const { mpc, facts, saved, restricted } = loaded;
+  if (mpc.status === "removed") return fail(RESTORE);
+  if (mpc.status === "placed") return fail(PLACED);
   if (mpc.status === "draft" || mpc.headlineRole === null || mpc.location === null) return fail(ACTIVATE);
 
   const settings = await getSettings(member.agencyId);
@@ -128,6 +132,8 @@ export async function generateSamplePitch(mpcId: string, opts: SamplePitchOption
   const available = facts.filter((f) => !keptFacts.has(f.id) && f.id !== swappedOut);
   const open = POSITIONS.filter((p) => !kept.has(p));
   if (swap !== undefined && available.length === 0) return fail(NO_SWAP);
+  // Nothing to keep and nothing to write from: no paid call, just say why.
+  if (kept.size === 0 && available.length === 0) return fail(strongFactsMessage(facts.length));
 
   let parts: { background: string; bullets: PitchBullet[] };
   try {
@@ -158,7 +164,8 @@ export async function generateSamplePitch(mpcId: string, opts: SamplePitchOption
     return b ? [b] : [];
   });
   const used = bullets.map((b) => eligible.get(b.factId)!);
-  const background = backgroundPasses(parts.background, used, restricted) ? parts.background : null;
+  // A background phrase stands on the facts the bullets use; with none used it has no backing.
+  const background = used.length > 0 && backgroundPasses(parts.background, used, restricted) ? parts.background : null;
 
   const warnings: string[] = [];
   if (bullets.length < 3) {

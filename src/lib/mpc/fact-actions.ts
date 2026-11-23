@@ -1,12 +1,13 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { mpcCredentials, mpcFacts, mpcRestrictions, mpcSavedBullets, mpcs } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { requireMember, type Member } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cleanFactText } from "./fact-text";
+import { restrictedTerm } from "./pitch-guard";
 import { isUuid } from "./queries";
 
 export type FactActionResult = { ok: true } | { ok: false; error: string };
@@ -168,6 +169,16 @@ export async function setRestrictions(mpcId: string, items: RestrictionInput[]):
     await tx.delete(mpcRestrictions).where(eq(mpcRestrictions.mpcId, mpcId));
     if (clean.length > 0) {
       await tx.insert(mpcRestrictions).values(clean.map((r) => ({ agencyId: member.agencyId, mpcId, kind: r.kind, value: r.value })));
+    }
+    // Saved bullets that now use a never-say or confidential term go, in the same transaction.
+    const terms = clean.filter((r) => r.kind === "never_say" || r.kind === "confidential").map((r) => r.value);
+    if (terms.length > 0) {
+      const saved = await tx
+        .select({ id: mpcSavedBullets.id, text: mpcSavedBullets.text })
+        .from(mpcSavedBullets)
+        .where(eq(mpcSavedBullets.mpcId, mpcId));
+      const bad = saved.filter((b) => restrictedTerm(b.text, terms) !== null).map((b) => b.id);
+      if (bad.length > 0) await tx.delete(mpcSavedBullets).where(inArray(mpcSavedBullets.id, bad));
     }
   });
   refresh(mpcId);

@@ -147,7 +147,7 @@ const sameNumber = (a: number, b: number) => Math.abs(a - b) <= Math.max(Math.ab
 /**
  * True when the source backs the figure. A number needs the same value, in the same unit when it
  * has one ($ or %), and a raising qualifier (40+, over 40) needs one in the source too. A magnitude word
- * needs the same wording, or a source figure at least that large of the same kind: a $ figure for
+ * needs the same wording in the same class (money or count), or a source figure at least that large of the same kind: a $ figure for
  * a money magnitude (seven-figure, million-dollar), a unitless one for a count (thousands of claims).
  */
 function backed(f: Figure, source: Figure[]): boolean {
@@ -164,7 +164,7 @@ function backed(f: Figure, source: Figure[]): boolean {
   }
   return source.some((s) =>
     s.kind === "magnitude"
-      ? s.raw === f.raw
+      ? s.raw === f.raw && s.money === f.money
       : s.value >= f.min && (f.money ? s.unit === "$" : s.unit === null),
   );
 }
