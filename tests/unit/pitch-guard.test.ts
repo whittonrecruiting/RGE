@@ -90,6 +90,35 @@ describe("number guard: inflation the figure match alone would miss", () => {
     ok("Tried 40+ cases to verdict", "Tried over 40 cases to verdict");
   });
 
+  test("bare hundreds, thousands and dozens (no 'of') are magnitudes", () => {
+    bad("Reviewed claims in the thousands", "Reviewed 900 claims");
+    bad("Tried cases numbering in the hundreds", "Tried 150 cases to verdict");
+    bad("Trained associates by the dozens", "Trained 12 associates");
+    ok("Reviewed claims in the thousands", "Reviewed 4,500 claims");
+    ok("Reviewed claims in the thousands", "Reviewed thousands of claims");
+  });
+
+  test("any N-figure is a magnitude of at least 10^(N-1), never the number N", () => {
+    bad("Managed a ten-figure insurer portfolio", "Managed 10 associates and a $120M portfolio");
+    ok("Managed a ten-figure insurer portfolio", "Managed a $1.4B insurer portfolio");
+    bad("Closed 8-figure settlements for carriers", "Closed $2M settlements for 8 carriers");
+    ok("Closed 8-figure settlements for carriers", "Closed $25M settlements for carriers");
+  });
+
+  test("bare thousand and chained spelled scales are numbers", () => {
+    bad("Reviewed a thousand coverage claims", "Reviewed 900 coverage claims");
+    ok("Reviewed a thousand coverage claims", "Reviewed 1,000 coverage claims");
+    ok("Recovered one hundred million for clients", "Recovered $100M for clients");
+    bad("Recovered one hundred million for clients", "Recovered $10M for clients");
+  });
+
+  test("a unitless number may drop a $ but not a %", () => {
+    bad("Supervised 45 attorneys on claims", "Cut claim costs by 45%");
+    ok("Raised 120M for the fund", "Raised $120M for the fund");
+    ok("Raised $ 120M for the fund", "Raised $120M for the fund");
+    bad("Raised $ 120M for the fund", "Raised 120M for the fund");
+  });
+
   test("percent and currency are units", () => {
     bad("Cut claim costs by 45%", "Supervised 45 attorneys on claims");
     ok("Cut claim costs by 45%", "Cut claim costs by 45 percent");

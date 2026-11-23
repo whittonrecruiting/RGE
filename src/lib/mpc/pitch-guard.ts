@@ -26,14 +26,24 @@ const WORD_NUMBERS: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
   eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
   eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
-  eighty: 80, ninety: 90, hundred: 100, dozen: 12, single: 1, double: 2, triple: 3, first: 1,
+  eighty: 80, ninety: 90, hundred: 100, thousand: 1000, dozen: 12, single: 1, double: 2, triple: 3, first: 1,
   second: 2, third: 3,
 };
 
 /**
  * Words that claim a size without a number. The value is the smallest figure that backs the claim:
- * "hundreds of" needs at least 200, "multimillion" at least 2 million, "six-figure" at least 100,000.
+ * "hundreds (of)" needs at least 200, "multimillion" at least 2 million. Any "N-figure" (six-figure,
+ * ten-figure, 7-figure) needs at least 10^(N-1); see figureMin.
  */
+const N_FIGURE = String.raw`(?:${Object.keys(WORD_NUMBERS).join("|")}|\d+)[\s-]figures?`;
+
+/** "seven-figure" and "7-figure" both need at least 1,000,000 (10^(N-1)). */
+function figureMin(key: string): number {
+  const n = key.split(/[\s-]/)[0];
+  const count = /^\d+$/.test(n) ? Number(n) : (WORD_NUMBERS[n] ?? 1);
+  return 10 ** Math.max(0, count - 1);
+}
+
 const MAGNITUDES: { pattern: string; min: number; dollars?: true }[] = [
   { pattern: String.raw`multi-?trillion`, min: 2e12 },
   { pattern: String.raw`multi-?billion`, min: 2e9 },
@@ -41,16 +51,13 @@ const MAGNITUDES: { pattern: string; min: number; dollars?: true }[] = [
   { pattern: String.raw`trillion-dollar`, min: 1e12, dollars: true },
   { pattern: String.raw`billion-dollar`, min: 1e9, dollars: true },
   { pattern: String.raw`million-dollar`, min: 1e6, dollars: true },
-  { pattern: String.raw`nine[\s-]figures?`, min: 1e8 },
-  { pattern: String.raw`eight[\s-]figures?`, min: 1e7 },
-  { pattern: String.raw`seven[\s-]figures?`, min: 1e6 },
-  { pattern: String.raw`six[\s-]figures?`, min: 1e5 },
+  { pattern: N_FIGURE, min: 0 },
   { pattern: String.raw`trillions`, min: 2e12 },
   { pattern: String.raw`billions`, min: 2e9 },
   { pattern: String.raw`millions`, min: 2e6 },
-  { pattern: String.raw`hundreds\s+of`, min: 200 },
-  { pattern: String.raw`thousands\s+of`, min: 2000 },
-  { pattern: String.raw`dozens\s+of`, min: 24 },
+  { pattern: String.raw`hundreds(?:\s+of)?`, min: 200 },
+  { pattern: String.raw`thousands(?:\s+of)?`, min: 2000 },
+  { pattern: String.raw`dozens(?:\s+of)?`, min: 24 },
   { pattern: String.raw`trillion`, min: 1e12 },
   { pattern: String.raw`billion`, min: 1e9 },
   { pattern: String.raw`million`, min: 1e6 },
@@ -60,15 +67,16 @@ const SCALE_ALT = "k|thousand|mm|mil|million|m|bn|billion|b|trillion|t";
 const WORD_ALT = Object.keys(WORD_NUMBERS).join("|");
 const WORD_SCALE_ALT = Object.keys(WORD_SCALES).join("|");
 const UNIT_AFTER = String.raw`(\s*%|\s+percent\b|\s+(?:dollars|usd)\b)?`;
-// One pass, left to right. Alternatives: a written figure ($120M, 120 million, $120,000,000, 40+,
-// 45%), a magnitude word (multimillion, seven-figure), or a spelled number with an optional scale
-// (two billion). Magnitudes come before spelled numbers so "seven-figure" is not read as 7.
+// One pass, left to right. Alternatives: a magnitude word (multimillion, seven-figure, 10-figure,
+// in the thousands), a written figure ($120M, $ 120 million, $120,000,000, 40+, 45%), or a spelled
+// number with optional scales (two billion, one hundred million). Magnitudes come first so
+// "seven-figure" and "10-figure" are not read as 7 or 10.
 // A scale letter followed by "&" is not a scale ("12 M&A deals").
 const FIGURE = new RegExp(
   [
-    String.raw`(?<cur>\$|\busd\s*)?(?<digits>\d[\d,]*(?:\.\d+)?)(?<plus1>\+)?(?:\s*(?<scale>${SCALE_ALT})\b(?!&))?(?<plus2>\+)?${UNIT_AFTER.replace("(", "(?<unit1>")}`,
     String.raw`\b(?<mag>${MAGNITUDES.map((m) => m.pattern).join("|")})\b`,
-    String.raw`\b(?<word>${WORD_ALT})\b(?:[\s-]+(?<wscale>${WORD_SCALE_ALT})\b)?(?<plus3>\+)?${UNIT_AFTER.replace("(", "(?<unit2>")}`,
+    String.raw`(?<cur>\$\s*|\busd\s*)?(?<digits>\d[\d,]*(?:\.\d+)?)(?<plus1>\+)?(?:\s*(?<scale>${SCALE_ALT})\b(?!&))?(?<plus2>\+)?${UNIT_AFTER.replace("(", "(?<unit1>")}`,
+    String.raw`\b(?<word>${WORD_ALT})\b(?<wscale>(?:[\s-]+(?:${WORD_SCALE_ALT})\b)*)(?<plus3>\+)?${UNIT_AFTER.replace("(", "(?<unit2>")}`,
   ].join("|"),
   "gi",
 );
@@ -96,7 +104,10 @@ function figuresIn(text: string): Figure[] {
     if (g.mag) {
       const key = g.mag.toLowerCase();
       const def = MAGNITUDES.find((d) => new RegExp(`^(?:${d.pattern})$`, "i").test(key))!;
-      out.push({ kind: "magnitude", raw: key.replace(/\s+/g, " "), min: def.min, dollars: def.dollars === true });
+      // "hundreds of" and "in the hundreds" are the same claim.
+      const norm = key.replace(/\s+/g, " ").replace(/ of$/, "");
+      const min = def.pattern === N_FIGURE ? figureMin(norm) : def.min;
+      out.push({ kind: "magnitude", raw: norm, min, dollars: def.dollars === true });
       continue;
     }
     let value: number;
@@ -105,7 +116,8 @@ function figuresIn(text: string): Figure[] {
       if (!Number.isFinite(base)) continue;
       value = base * (g.scale ? (SCALES[g.scale.toLowerCase()] ?? 1) : 1);
     } else {
-      value = WORD_NUMBERS[g.word.toLowerCase()] * (g.wscale ? WORD_SCALES[g.wscale.toLowerCase()] : 1);
+      value = WORD_NUMBERS[g.word.toLowerCase()];
+      for (const w of (g.wscale ?? "").toLowerCase().split(/[\s-]+/).filter(Boolean)) value *= WORD_SCALES[w];
     }
     const raised = Boolean(g.plus1 || g.plus2 || g.plus3) || RAISE_BEFORE.test(text.slice(Math.max(0, at - 30), at));
     out.push({
@@ -133,12 +145,13 @@ const sameNumber = (a: number, b: number) => Math.abs(a - b) <= Math.max(Math.ab
  */
 function backed(f: Figure, source: Figure[]): boolean {
   if (f.kind === "number") {
-    // A unit on the claim ($ or %) must be in the source too; dropping one is not an inflation.
+    // A unit on the claim ($ or %) must be in the source too.
     return source.some(
       (s) =>
         s.kind === "number" &&
         sameNumber(s.value, f.value) &&
-        (f.unit === null || s.unit === f.unit) &&
+        // A unitless claim may drop a $, but must not turn a percentage into a count.
+        (f.unit === null ? s.unit !== "%" : s.unit === f.unit) &&
         (!f.raised || s.raised),
     );
   }
