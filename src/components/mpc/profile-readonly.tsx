@@ -8,8 +8,8 @@ const list = (items: string[]) => (items.length ? items.join(", ") : "None");
 
 export function ProfileReadOnly({ mpc }: { mpc: MpcDetail }) {
   const rows: [string, string][] = [
-    ["Headline role", mpc.headlineRole],
-    ["Location", mpc.location],
+    ["Headline role", mpc.headlineRole ?? "Not set"],
+    ["Location", mpc.location ?? "Not set"],
     ["Seniority", mpc.seniority || "Not set"],
     ["Years of experience", mpc.yearsExperience === null ? "Not set" : String(mpc.yearsExperience)],
     ["Overlap priority", String(mpc.overlapPriority)],

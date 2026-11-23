@@ -6,7 +6,7 @@ for (const vp of [
   { w: 390, h: 844, name: "phone" },
   { w: 1440, h: 900, name: "desktop" },
 ]) {
-  for (const view of ["", "detail", "readonly"]) {
+  for (const view of ["", "detail", "readonly", "draft", "draft-readonly"]) {
     test(`MPC ${view || "list"} has no horizontal scroll with a 90 character headline on ${vp.name}`, async ({
       page,
     }) => {
@@ -38,4 +38,34 @@ test("edit form is one column on phone and two on desktop", async ({ page }) => 
   expect(await x("Location")).toBe(await x("Seniority"));
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(await x("Location")).not.toBe(await x("Seniority"));
+});
+
+test("a draft with no role shows as Untitled draft with an amber Draft badge", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/dev/mpcs");
+  const row = page.getByRole("row").filter({ hasText: "Untitled draft" });
+  await expect(row).toBeVisible();
+  await expect(row.getByText("Draft", { exact: true })).toHaveClass(/text-flag/);
+  await expect(row.getByText("Missing headline role, years of experience and pay target")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Draft", exact: true })).toBeVisible();
+});
+
+test("a draft page has the banner and marks the empty required field", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/dev/mpcs?view=draft");
+  await expect(page.getByRole("heading", { name: "Untitled draft" })).toBeVisible();
+  await expect(page.getByText("This MPC is a draft. Add the headline role and location to activate it.")).toBeVisible();
+  const role = page.getByLabel("Headline role");
+  await expect(role).toHaveClass(/border-flag/);
+  await expect(role).not.toHaveAttribute("required");
+  await expect(page.getByLabel("Location")).not.toHaveClass(/border-flag/);
+  await expect(page.getByText("Required to activate")).toHaveCount(1);
+  await role.fill("Litigation Associate");
+  await expect(page.getByText("Required to activate")).toHaveCount(0);
+});
+
+test("a draft read-only view shows Not set for the missing role", async ({ page }) => {
+  await page.goto("/dev/mpcs?view=draft-readonly");
+  await expect(page.getByRole("heading", { name: "Untitled draft" })).toBeVisible();
+  await expect(page.getByText("Not set").first()).toBeVisible();
 });

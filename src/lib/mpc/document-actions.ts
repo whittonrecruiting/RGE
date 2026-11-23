@@ -23,14 +23,15 @@ import { draftSigningConfigured, signDraft, verifyDraft } from "./draft-signing"
 import { toSources } from "./document-queries";
 import { cleanFactText } from "./fact-text";
 import { isUuid } from "./queries";
-import { mpcInput, type MpcInput } from "./schema";
+import { mpcDraftInput, mpcInput, type MpcInput } from "./schema";
 
 export type DocKind = "resume" | "notes" | "transcript";
 export type AddDocumentResult = { ok: true; documentId: string } | { ok: false; error: string };
 export type ExtractionResult =
   | { ok: true; draft: ProfileDraft; issuedAt: number; signature: string }
   | { ok: false; error: string };
-export type ApplyResult = { ok: true } | { ok: false; error: string };
+/** activated is set when the accepted fields completed a draft and it became active. */
+export type ApplyResult = { ok: true; activated?: true } | { ok: false; error: string };
 
 /** What the reviewer accepted. The draft is sent back and re-checked against the stored documents. */
 export type AcceptedExtraction = {
@@ -216,10 +217,11 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
     const [current] = await tx.select().from(mpcs).where(eq(mpcs.id, mpcId));
     if (!current) return fail(NOT_FOUND);
 
-    // Validate the merged profile before any write.
-    let merged: ReturnType<typeof mpcInput.parse> | null = null;
+    // Validate the merged profile before any write. A draft may still lack headline role and location.
+    const isDraft = current.status === "draft";
+    let merged: ReturnType<typeof mpcDraftInput.parse> | null = null;
     if (Object.keys(fields).length > 0) {
-      const parsed = mpcInput.safeParse({
+      const parsed = (isDraft ? mpcDraftInput : mpcInput).safeParse({
         headlineRole: current.headlineRole,
         location: current.location,
         yearsExperience: current.yearsExperience,
@@ -238,7 +240,14 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
       merged = parsed.data;
     }
 
-    if (merged) await tx.update(mpcs).set({ ...merged, updatedAt: new Date() }).where(eq(mpcs.id, mpcId));
+    // A draft that now has both headline role and location becomes active in this same transaction.
+    const activated = isDraft && merged !== null && merged.headlineRole !== null && merged.location !== null;
+    if (merged) {
+      await tx
+        .update(mpcs)
+        .set({ ...merged, ...(activated ? { status: "active" as const } : {}), updatedAt: new Date() })
+        .where(eq(mpcs.id, mpcId));
+    }
 
     if (facts.length > 0) {
       const have = new Set(
@@ -284,7 +293,7 @@ export async function applyExtraction(mpcId: string, accepted: AcceptedExtractio
         await tx.insert(mpcRestrictions).values(fresh.map((r) => ({ agencyId: member.agencyId, mpcId, kind: r.kind, value: r.value })));
       }
     }
-    return { ok: true };
+    return activated ? { ok: true, activated: true } : { ok: true };
   });
   if (result.ok) {
     revalidatePath("/mpcs");

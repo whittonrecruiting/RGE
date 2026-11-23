@@ -30,7 +30,7 @@ const HINTS_TOO_LONG = `Keep the details under ${MAX_HINTS_CHARS} characters.`;
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 
-type Loaded = { ownerUserId: string; headlineRole: string; location: string; specialtyTags: string[] };
+type Loaded = { ownerUserId: string; headlineRole: string | null; location: string | null; specialtyTags: string[] };
 
 async function authorize(member: Member, mpcId: string): Promise<{ error: string } | { mpc: Loaded }> {
   if (!isUuid(mpcId)) return { error: NOT_FOUND };

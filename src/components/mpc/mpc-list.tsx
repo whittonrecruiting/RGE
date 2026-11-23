@@ -1,13 +1,23 @@
 import Link from "next/link";
 import type { MpcRow } from "@/lib/mpc/queries";
+import { mpcTitle } from "@/lib/mpc/schema";
 import { MpcFlags, StatusBadge } from "./badges";
 
-const MISSING_LABEL = { years: "years of experience", payTarget: "pay target" } as const;
+const MISSING_LABEL = {
+  headlineRole: "headline role",
+  location: "location",
+  years: "years of experience",
+  payTarget: "pay target",
+} as const;
 
 function missingText(row: MpcRow) {
   if (row.missing.length === 0) return null;
-  return `Missing ${row.missing.map((m) => MISSING_LABEL[m]).join(" and ")}`;
+  const labels = row.missing.map((m) => MISSING_LABEL[m]);
+  const last = labels.pop();
+  return `Missing ${labels.length ? `${labels.join(", ")} and ${last}` : last}`;
 }
+
+const NO_LOCATION = "No location yet";
 
 export function MpcList({ rows, showOwner }: { rows: MpcRow[]; showOwner: boolean }) {
   return (
@@ -21,11 +31,11 @@ export function MpcList({ rows, showOwner }: { rows: MpcRow[]; showOwner: boolea
                 href={`/mpcs/${r.id}`}
                 className="min-w-0 [overflow-wrap:anywhere] text-sm font-semibold text-text hover:text-gold"
               >
-                {r.headlineRole}
+                {mpcTitle(r.headlineRole)}
               </Link>
               <StatusBadge status={r.status} />
             </div>
-            <p className="mt-1 [overflow-wrap:anywhere] text-sm text-text-soft">{r.location}</p>
+            <p className="mt-1 [overflow-wrap:anywhere] text-sm text-text-soft">{r.location ?? NO_LOCATION}</p>
             {showOwner && <p className="mt-1 [overflow-wrap:anywhere] text-xs text-muted">Owner: {r.ownerName}</p>}
             {missingText(r) && <p className="mt-1 text-xs text-muted">{missingText(r)}</p>}
             <div className="mt-3 flex flex-wrap gap-2 empty:hidden">
@@ -56,11 +66,11 @@ export function MpcList({ rows, showOwner }: { rows: MpcRow[]; showOwner: boolea
               <tr key={r.id} className="align-top">
                 <td className="[overflow-wrap:anywhere] px-4 py-3">
                   <Link href={`/mpcs/${r.id}`} className="font-semibold text-text hover:text-gold">
-                    {r.headlineRole}
+                    {mpcTitle(r.headlineRole)}
                   </Link>
                   {missingText(r) && <p className="mt-1 text-xs text-muted">{missingText(r)}</p>}
                 </td>
-                <td className="[overflow-wrap:anywhere] px-4 py-3 text-text-soft">{r.location}</td>
+                <td className="[overflow-wrap:anywhere] px-4 py-3 text-text-soft">{r.location ?? NO_LOCATION}</td>
                 {showOwner && <td className="[overflow-wrap:anywhere] px-4 py-3 text-text-soft">{r.ownerName}</td>}
                 <td className="px-4 py-3">
                   <StatusBadge status={r.status} />

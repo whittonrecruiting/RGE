@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   foreignKey,
   index,
@@ -39,7 +41,7 @@ const sameAgencyMember = (t: AgencyRow, col: AnyPgColumn, name: string) =>
 
 export const membershipRole = pgEnum("membership_role", ["owner", "admin", "recruiter"]);
 export const membershipStatus = pgEnum("membership_status", ["active", "removed"]);
-export const mpcStatus = pgEnum("mpc_status", ["active", "paused", "removed", "placed"]);
+export const mpcStatus = pgEnum("mpc_status", ["draft", "active", "paused", "removed", "placed"]);
 export const workMode = pgEnum("work_mode", ["onsite", "hybrid", "remote", "any"]);
 export const employerType = pgEnum("employer_type", ["inhouse", "firm", "either"]);
 export const factSourceKind = pgEnum("fact_source_kind", ["resume", "notes", "transcript", "web", "manual"]);
@@ -104,8 +106,9 @@ export const mpcs = pgTable(
     ownerUserId: uuid("owner_user_id").notNull(),
     status: mpcStatus("status").notNull().default("active"),
     pauseReason: text("pause_reason"),
-    headlineRole: text("headline_role").notNull(),
-    location: text("location").notNull(),
+    // Null only while the MPC is a draft (mpcs_required_unless_draft).
+    headlineRole: text("headline_role"),
+    location: text("location"),
     yearsExperience: integer("years_experience"),
     seniority: text("seniority"),
     specialtyTags: text("specialty_tags").array().notNull().default([]),
@@ -121,6 +124,12 @@ export const mpcs = pgTable(
   (t) => [
     unique("mpcs_agency_id_unique").on(t.agencyId, t.id),
     sameAgencyMember(t, t.ownerUserId, "mpcs_owner_member_fk"),
+    // Compared as text: the enum value 'draft' is added in the same migration transaction, and a
+    // new enum value cannot be used as an enum literal until that transaction commits.
+    check(
+      "mpcs_required_unless_draft",
+      sql`${t.status}::text = 'draft' OR (${t.headlineRole} IS NOT NULL AND ${t.location} IS NOT NULL)`,
+    ),
   ],
 );
 

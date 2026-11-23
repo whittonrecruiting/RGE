@@ -20,6 +20,13 @@ export function StatusControls({ mpcId, status }: { mpcId: string; status: MpcSt
     });
   }
 
+  if (status === "draft") {
+    return (
+      <p className="text-sm text-text-soft">
+        Drafts are not marketed. This MPC becomes active as soon as its headline role and location are saved.
+      </p>
+    );
+  }
   if (status === "placed") {
     return <p className="text-sm text-text-soft">This MPC is placed. Its status cannot be changed here.</p>;
   }

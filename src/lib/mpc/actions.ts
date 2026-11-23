@@ -7,9 +7,19 @@ import { withAgency } from "@/db/with-agency";
 import { requireMember } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { isUuid } from "./queries";
-import { mpcInput, type MpcFields, type MpcInput, type SettableStatus } from "./schema";
+import {
+  mpcDraftInput,
+  mpcInput,
+  type MpcDraftFields,
+  type MpcDraftInput,
+  type MpcFields,
+  type MpcInput,
+  type SettableStatus,
+} from "./schema";
 
 export type MpcResult = { ok: true } | { ok: false; error: string };
+/** activated is set when the update completed a draft and it became active. */
+export type UpdateResult = { ok: true; activated?: true } | { ok: false; error: string };
 export type CreateResult = { ok: true; id: string } | { ok: false; error: string };
 export type PauseAllResult = { ok: true; count: number } | { ok: false; error: string };
 
@@ -19,6 +29,8 @@ const NO_REASSIGN = "You do not have permission to reassign MPCs.";
 const NO_AGENCY_PAUSE = "You do not have permission to pause the whole agency.";
 const NOT_ACTIVE_MEMBER = "Choose an active member of your team.";
 const PLACED = "A placed MPC cannot be changed here.";
+const DRAFT_INCOMPLETE = "Add the headline role and location before activating.";
+const DRAFT_NO_PAUSE = "A draft cannot be paused or removed until it has a headline role and location.";
 const MAX_REASON = 500;
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -33,11 +45,22 @@ const cleanReason = (reason: unknown): string | null => {
   return t === "" ? null : t;
 };
 
-function parseInput(input: MpcInput): { ok: true; data: MpcFields } | { ok: false; error: string } {
+type Parsed<T> = { ok: true; data: T } | { ok: false; error: string };
+const firstIssue = (e: { issues: { message: string }[] }) => e.issues[0]?.message ?? "Check the form and try again.";
+
+function parseInput(input: MpcInput): Parsed<MpcFields> {
   const parsed = mpcInput.safeParse(input);
-  if (parsed.success) return { ok: true, data: parsed.data };
-  return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+  return parsed.success ? { ok: true, data: parsed.data } : fail(firstIssue(parsed.error));
 }
+
+function parseDraftInput(input: MpcDraftInput): Parsed<MpcDraftFields> {
+  const parsed = mpcDraftInput.safeParse(input);
+  return parsed.success ? { ok: true, data: parsed.data } : fail(firstIssue(parsed.error));
+}
+
+/** A draft is complete, and becomes active, once it has both a headline role and a location. */
+const isComplete = (v: { headlineRole: string | null; location: string | null }) =>
+  v.headlineRole !== null && v.location !== null;
 
 // Every action calls requireMember() itself: the layout guard does not protect server actions.
 
@@ -57,17 +80,48 @@ export async function createMpc(input: MpcInput): Promise<CreateResult> {
   return { ok: true, id: row.id };
 }
 
-export async function updateMpc(id: string, input: MpcInput): Promise<MpcResult> {
+/** Starts an empty draft owned by the caller. It becomes active once its headline role and location are set. */
+export async function createDraftMpc(): Promise<CreateResult> {
+  const member = await requireMember();
+  if (!can(member, "mpc.edit", { ownerUserId: member.userId })) return fail(NOT_YOURS);
+  const [row] = await withAgency(member.agencyId, (tx) =>
+    tx
+      .insert(mpcs)
+      .values({ agencyId: member.agencyId, ownerUserId: member.userId, status: "draft" })
+      .returning({ id: mpcs.id }),
+  );
+  revalidate(row.id);
+  return { ok: true, id: row.id };
+}
+
+/**
+ * Saves the profile. A draft may leave headline role and location blank; any other MPC must have
+ * both. A draft that ends up with both becomes active in the same transaction.
+ */
+export async function updateMpc(id: string, input: MpcInput | MpcDraftInput): Promise<UpdateResult> {
   const member = await requireMember();
   if (!isUuid(id)) return fail(NOT_FOUND);
-  const result = await withAgency(member.agencyId, async (tx): Promise<MpcResult> => {
-    const [current] = await tx.select({ ownerUserId: mpcs.ownerUserId }).from(mpcs).where(eq(mpcs.id, id));
+  const result = await withAgency(member.agencyId, async (tx): Promise<UpdateResult> => {
+    const [current] = await tx
+      .select({ ownerUserId: mpcs.ownerUserId, status: mpcs.status })
+      .from(mpcs)
+      .where(eq(mpcs.id, id));
     if (!current) return fail(NOT_FOUND);
     if (!can(member, "mpc.edit", { ownerUserId: current.ownerUserId })) return fail(NOT_YOURS);
-    const parsed = parseInput(input);
+    if (current.status !== "draft") {
+      const parsed = parseInput(input as MpcInput);
+      if (!parsed.ok) return fail(parsed.error);
+      await tx.update(mpcs).set({ ...parsed.data, updatedAt: new Date() }).where(eq(mpcs.id, id));
+      return { ok: true };
+    }
+    const parsed = parseDraftInput(input);
     if (!parsed.ok) return fail(parsed.error);
-    await tx.update(mpcs).set({ ...parsed.data, updatedAt: new Date() }).where(eq(mpcs.id, id));
-    return { ok: true };
+    const activate = isComplete(parsed.data);
+    await tx
+      .update(mpcs)
+      .set({ ...parsed.data, ...(activate ? { status: "active" as const } : {}), updatedAt: new Date() })
+      .where(eq(mpcs.id, id));
+    return activate ? { ok: true, activated: true } : { ok: true };
   });
   if (result.ok) revalidate(id);
   return result;
@@ -81,12 +135,19 @@ export async function setMpcStatus(id: string, status: SettableStatus, reason?: 
   }
   const result = await withAgency(member.agencyId, async (tx): Promise<MpcResult> => {
     const [current] = await tx
-      .select({ ownerUserId: mpcs.ownerUserId, status: mpcs.status })
+      .select({
+        ownerUserId: mpcs.ownerUserId,
+        status: mpcs.status,
+        headlineRole: mpcs.headlineRole,
+        location: mpcs.location,
+      })
       .from(mpcs)
       .where(eq(mpcs.id, id));
     if (!current) return fail(NOT_FOUND);
     if (!can(member, "mpc.edit", { ownerUserId: current.ownerUserId })) return fail(NOT_YOURS);
     if (current.status === "placed") return fail(PLACED);
+    // Only a draft may lack these; the database refuses any other status without them.
+    if (!isComplete(current)) return fail(status === "active" ? DRAFT_INCOMPLETE : DRAFT_NO_PAUSE);
     await tx
       .update(mpcs)
       .set({ status, pauseReason: status === "paused" ? cleanReason(reason) : null, updatedAt: new Date() })
@@ -98,7 +159,7 @@ export async function setMpcStatus(id: string, status: SettableStatus, reason?: 
 }
 
 /**
- * Pauses active MPCs: the caller's own by default. Owner and Admin may pass scope 'agency' to
+ * Pauses active MPCs (never drafts): the caller's own by default. Owner and Admin may pass scope 'agency' to
  * pause every active MPC in the agency.
  */
 export async function pauseAllMpcs(reason: string, scope: "mine" | "agency" = "mine"): Promise<PauseAllResult> {

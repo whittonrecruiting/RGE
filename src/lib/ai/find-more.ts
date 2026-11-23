@@ -3,7 +3,13 @@ import { z } from "zod";
 import { defaultGenerate, type AiUsage, type GenerateFn } from "./models";
 
 export type FoundFact = { text: string; url: string; quote: string };
-export type FindMoreMpc = { headlineRole: string; location: string; specialtyTags: string[]; facts: string[] };
+/** Headline role and location are null while the MPC is a draft. */
+export type FindMoreMpc = {
+  headlineRole: string | null;
+  location: string | null;
+  specialtyTags: string[];
+  facts: string[];
+};
 
 /** Same rule as profile extraction: a quote shorter than this is not evidence. */
 export const MIN_WEB_QUOTE_CHARS = 20;
@@ -65,8 +71,8 @@ function buildPrompt(mpc: FindMoreMpc, hints: string): string {
   return [
     "Find public professional facts about this candidate.",
     "",
-    `Role: ${mpc.headlineRole}`,
-    `Location: ${mpc.location}`,
+    `Role: ${mpc.headlineRole ?? "(not set)"}`,
+    `Location: ${mpc.location ?? "(not set)"}`,
     `Specialties: ${mpc.specialtyTags.join(", ") || "(none)"}`,
     "",
     "Known facts:",

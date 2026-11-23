@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { mpcConsents, mpcFacts, memberships, mpcs } from "@/db/schema";
 import { revalidatePath } from "next/cache";
-import { createMpc, pauseAllMpcs, reassignMpc, setMpcStatus, updateMpc } from "@/lib/mpc/actions";
+import { createDraftMpc, createMpc, pauseAllMpcs, reassignMpc, setMpcStatus, updateMpc } from "@/lib/mpc/actions";
 import { getMpc, listActiveMembers, listMpcs } from "@/lib/mpc/queries";
 import { mpcInput } from "@/lib/mpc/schema";
 import type { Member } from "@/lib/auth";
@@ -44,6 +44,12 @@ const setStatusAs = (m: Member, id: string, s: Parameters<typeof setMpcStatus>[1
 const pauseAllAs = (m: Member, reason: string, scope?: "mine" | "agency") =>
   asMember(m, () => pauseAllMpcs(reason, scope));
 const reassignAs = (m: Member, id: string, to: string) => asMember(m, () => reassignMpc(id, to));
+const createDraftMpcAs = (m: Member) => asMember(m, () => createDraftMpc());
+async function mustDraft(m: Member) {
+  const r = await createDraftMpcAs(m);
+  if (!r.ok) throw new Error(`draft failed: ${r.error}`);
+  return r.id;
+}
 
 async function mustCreate(m: Member, input: Input = base) {
   const r = await createAs(m, input);
@@ -355,3 +361,103 @@ describe("listActiveMembers", () => {
   });
 });
 
+describe("draft MPCs", () => {
+  test("createDraftMpc saves a draft with no fields", async () => {
+    const r = await createDraftMpcAs(f.recA);
+    if (!r.ok) throw new Error(r.error);
+    const mpc = await getMpcAs(f.recA, r.id);
+    expect(mpc?.status).toBe("draft");
+    expect(mpc?.ownerUserId).toBe(f.recA.userId);
+    expect(mpc?.headlineRole).toBeNull();
+    expect(mpc?.location).toBeNull();
+    expect(revalidatePath).toHaveBeenCalledWith("/mpcs");
+  });
+
+  test("database rejects an active MPC without a role or location", async () => {
+    const insert = (values: { status: "active" | "paused" | "draft"; headlineRole: string | null; location: string | null }) =>
+      asOwner(db, (tx) =>
+        tx.insert(mpcs).values({ agencyId: f.agency.id, ownerUserId: f.recA.userId, ...values }).returning({ id: mpcs.id }),
+      );
+    await expect(insert({ status: "active", headlineRole: null, location: "Phoenix, AZ" })).rejects.toThrow();
+    await expect(insert({ status: "paused", headlineRole: "Associate", location: null })).rejects.toThrow();
+    await expect(insert({ status: "draft", headlineRole: null, location: null })).resolves.toHaveLength(1);
+  });
+
+  test("a draft activates when role and location are both set", async () => {
+    const id = await mustDraft(f.recA);
+    const first = await updateMpcAs(f.recA, id, { location: "Phoenix, AZ" } as Input);
+    expect(first).toEqual({ ok: true });
+    expect((await getMpcAs(f.recA, id))?.status).toBe("draft");
+    expect((await getMpcAs(f.recA, id))?.location).toBe("Phoenix, AZ");
+    const r = await updateMpcAs(f.recA, id, { headlineRole: "Litigation Associate", location: "Phoenix, AZ" });
+    expect(r).toMatchObject({ ok: true, activated: true });
+    expect((await getMpcAs(f.recA, id))?.status).toBe("active");
+  });
+
+  test("draft updates still validate the other fields", async () => {
+    const id = await mustDraft(f.recA);
+    expect((await updateMpcAs(f.recA, id, { yearsExperience: -1 } as Input)).ok).toBe(false);
+    expect((await updateMpcAs(f.recA, id, { headlineRole: "x".repeat(121) } as Input)).ok).toBe(false);
+  });
+
+  test("a teammate recruiter cannot edit a draft", async () => {
+    const id = await mustDraft(f.recA);
+    expect(await updateMpcAs(f.recB, id, base)).toEqual({ ok: false, error: "You can only edit your own MPCs." });
+  });
+
+  test("cannot set a draft active without required fields", async () => {
+    const id = await mustDraft(f.recA);
+    expect(await setStatusAs(f.recA, id, "active")).toEqual({
+      ok: false,
+      error: "Add the headline role and location before activating.",
+    });
+    expect((await getMpcAs(f.recA, id))?.status).toBe("draft");
+  });
+
+  test("an incomplete draft cannot be paused or removed", async () => {
+    const id = await mustDraft(f.recA);
+    const NO = { ok: false, error: "A draft cannot be paused or removed until it has a headline role and location." };
+    expect(await setStatusAs(f.recA, id, "paused", "x")).toEqual(NO);
+    expect(await setStatusAs(f.recA, id, "removed")).toEqual(NO);
+    expect((await getMpcAs(f.recA, id))?.status).toBe("draft");
+  });
+
+  test("an activated draft behaves like any other MPC", async () => {
+    const id = await mustDraft(f.recA);
+    await updateMpcAs(f.recA, id, base);
+    expect((await setStatusAs(f.recA, id, "removed")).ok).toBe(true);
+    expect((await setStatusAs(f.recA, id, "active")).ok).toBe(true);
+    expect((await updateMpcAs(f.recA, id, { ...base, location: "" })).ok).toBe(false);
+  });
+
+  test("pause all skips drafts", async () => {
+    const d = await mustDraft(f.recA);
+    const a = await mustCreate(f.recA);
+    expect(await pauseAllAs(f.recA, "Vacation")).toEqual({ ok: true, count: 1 });
+    expect((await getMpcAs(f.recA, d))?.status).toBe("draft");
+    expect((await getMpcAs(f.recA, a))?.status).toBe("paused");
+  });
+
+  test("listMpcs shows drafts with missing role and location first", async () => {
+    await mustDraft(f.recA);
+    const [row] = await listMpcsAs(f.recA, { owner: "me" });
+    expect(row.status).toBe("draft");
+    expect(row.headlineRole).toBeNull();
+    expect(row.missing.slice(0, 2)).toEqual(["headlineRole", "location"]);
+    expect((await listMpcsAs(f.recA, { owner: "me", status: "draft" })).map((r) => r.id)).toEqual([row.id]);
+  });
+
+  test("non-draft update still requires headline role", async () => {
+    const id = await mustCreate(f.recA);
+    expect((await updateMpcAs(f.recA, id, { ...base, headlineRole: "" })).ok).toBe(false);
+    expect((await updateMpcAs(f.recA, id, { ...base, location: "" })).ok).toBe(false);
+    const ok = await updateMpcAs(f.recA, id, base);
+    expect(ok).toEqual({ ok: true });
+  });
+
+  test("an admin can reassign a draft", async () => {
+    const id = await mustDraft(f.recA);
+    expect((await reassignAs(f.admin, id, f.recB.userId)).ok).toBe(true);
+    expect((await getMpcAs(f.recB, id))?.ownerUserId).toBe(f.recB.userId);
+  });
+});

@@ -71,6 +71,13 @@
       "when": 1795300534496,
       "tag": "0009_session_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795468079238,
+      "tag": "0010_mpc_draft",
+      "breakpoints": true
     }
   ]
 }

@@ -8,8 +8,9 @@ import { fieldClass, primaryButton, quietButton } from "./ui";
 import Link from "next/link";
 
 export type ProfileValues = {
-  headlineRole: string;
-  location: string;
+  /** Null only while the MPC is a draft. */
+  headlineRole: string | null;
+  location: string | null;
   yearsExperience: number | null;
   seniority: string | null;
   specialtyTags: string[];
@@ -27,27 +28,41 @@ function Field({
   hint,
   children,
   wide,
+  warn,
 }: {
   label: string;
   hint?: string;
   children: React.ReactNode;
   wide?: boolean;
+  /** Show the hint in amber. */
+  warn?: boolean;
 }) {
   return (
     <label className={`flex min-w-0 flex-col gap-1 text-xs text-muted ${wide ? "md:col-span-2" : ""}`}>
       {label}
       {children}
-      {hint && <span className="text-xs text-muted">{hint}</span>}
+      {hint && <span className={`text-xs ${warn ? "text-flag" : "text-muted"}`}>{hint}</span>}
     </label>
   );
 }
 
 const text = (data: FormData, name: string) => String(data.get(name) ?? "");
 
-export function ProfileForm({ mpcId, initial }: { mpcId?: string; initial?: ProfileValues }) {
+const REQUIRED_TO_ACTIVATE = "Required to activate";
+/** Amber outline on a required field a draft has not filled yet. */
+const draftGapClass = fieldClass.replace("border-line", "border-flag");
+
+/**
+ * draft: the MPC is a draft. Headline role and location may stay blank; while blank they are
+ * outlined in amber. Saving with both set activates the MPC.
+ */
+export function ProfileForm({ mpcId, initial, draft = false }: { mpcId?: string; initial?: ProfileValues; draft?: boolean }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [role, setRole] = useState(initial?.headlineRole ?? "");
+  const [location, setLocation] = useState(initial?.location ?? "");
+  const gap = (value: string) => draft && value.trim() === "";
   const [pending, start] = useTransition();
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -68,12 +83,12 @@ export function ProfileForm({ mpcId, initial }: { mpcId?: string; initial?: Prof
       overlapPriority: text(data, "overlapPriority"),
     } as MpcInput;
     setError(null);
-    setSaved(false);
+    setSaved(null);
     start(async () => {
       if (mpcId) {
         const result = await updateMpc(mpcId, input);
         if (result.ok) {
-          setSaved(true);
+          setSaved(result.activated ? "Saved. This MPC is now active." : "Saved.");
           router.refresh();
         } else {
           setError(result.error);
@@ -90,17 +105,25 @@ export function ProfileForm({ mpcId, initial }: { mpcId?: string; initial?: Prof
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Headline role" wide>
+        <Field label="Headline role" hint={gap(role) ? REQUIRED_TO_ACTIVATE : undefined} warn wide>
           <input
             name="headlineRole"
-            required
+            required={!draft}
             maxLength={120}
-            defaultValue={v?.headlineRole ?? ""}
-            className={fieldClass}
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className={gap(role) ? draftGapClass : fieldClass}
           />
         </Field>
-        <Field label="Location">
-          <input name="location" required maxLength={120} defaultValue={v?.location ?? ""} className={fieldClass} />
+        <Field label="Location" hint={gap(location) ? REQUIRED_TO_ACTIVATE : undefined} warn>
+          <input
+            name="location"
+            required={!draft}
+            maxLength={120}
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            className={gap(location) ? draftGapClass : fieldClass}
+          />
         </Field>
         <Field label="Seniority">
           <input name="seniority" maxLength={120} defaultValue={v?.seniority ?? ""} className={fieldClass} />
@@ -189,7 +212,7 @@ export function ProfileForm({ mpcId, initial }: { mpcId?: string; initial?: Prof
       )}
       {saved && (
         <p role="status" className="text-sm text-ok">
-          Saved.
+          {saved}
         </p>
       )}
       <div className="flex flex-wrap gap-3">

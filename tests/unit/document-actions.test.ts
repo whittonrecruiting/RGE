@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { mpcDocuments, mpcFacts, mpcRestrictions, mpcs } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
-import { createMpc } from "@/lib/mpc/actions";
+import { createDraftMpc, createMpc } from "@/lib/mpc/actions";
 import { addDocument, applyExtraction, runExtraction } from "@/lib/mpc/document-actions";
 import { listDocuments, listFacts } from "@/lib/mpc/document-queries";
 import { getMpc } from "@/lib/mpc/queries";
@@ -213,6 +213,42 @@ describe("applyExtraction", () => {
       ["Open to Denver", "interview_only", "notes"],
     ]);
     expect(await withAgency(f.agency.id, (tx) => tx.select().from(mpcRestrictions))).toHaveLength(0);
+  });
+
+  test("applyExtraction activates a draft when it fills role and location", async () => {
+    const d = await asMember(f.recA, () => createDraftMpc());
+    if (!d.ok) throw new Error(d.error);
+    await seedDocs(d.id);
+    setTestGenerate(
+      fakeGenerate({ ...draftOut, fields: { headlineRole: "Litigation Associate", location: "Denver, CO", yearsExperience: 9 } }),
+    );
+    const run = await asMember(f.recA, () => runExtraction(d.id));
+    if (!run.ok) throw new Error(run.error);
+    const s = { draft: run.draft, issuedAt: run.issuedAt, signature: run.signature };
+    // Only the location: stays a draft.
+    expect(await asMember(f.recA, () => applyExtraction(d.id, accept(s, { fields: { location: "Denver, CO" } })))).toEqual({
+      ok: true,
+    });
+    expect((await asMember(f.recA, () => getMpc(f.recA, d.id)))?.status).toBe("draft");
+    const r = await asMember(f.recA, () =>
+      applyExtraction(d.id, accept(s, { fields: { headlineRole: "Litigation Associate", location: "Denver, CO" } })),
+    );
+    expect(r).toEqual({ ok: true, activated: true });
+    const mpc = await asMember(f.recA, () => getMpc(f.recA, d.id));
+    expect(mpc).toMatchObject({ status: "active", headlineRole: "Litigation Associate", location: "Denver, CO" });
+  });
+
+  test("applyExtraction on a draft without role and location keeps it a draft and saves facts", async () => {
+    const d = await asMember(f.recA, () => createDraftMpc());
+    if (!d.ok) throw new Error(d.error);
+    await seedDocs(d.id);
+    const s = await draftFor(d.id);
+    expect(
+      await asMember(f.recA, () => applyExtraction(d.id, accept(s, { fields: { yearsExperience: 9 }, factIndexes: [0] }))),
+    ).toEqual({ ok: true });
+    const mpc = await asMember(f.recA, () => getMpc(f.recA, d.id));
+    expect(mpc).toMatchObject({ status: "draft", yearsExperience: 9 });
+    expect(await factsOf(f.recA, d.id)).toHaveLength(1);
   });
 
   test("accepted restrictions are saved", async () => {

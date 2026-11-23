@@ -10,6 +10,7 @@ const OWNERS: { value: OwnerFilter; label: string }[] = [
 ];
 const STATUSES: { value: StatusFilter; label: string }[] = [
   { value: undefined, label: "All" },
+  { value: "draft", label: "Draft" },
   { value: "active", label: "Active" },
   { value: "paused", label: "Paused" },
   { value: "placed", label: "Placed" },

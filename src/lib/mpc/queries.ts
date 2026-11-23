@@ -10,7 +10,8 @@ export type MpcFilter = {
   status?: MpcStatus;
 };
 
-export type Missing = "years" | "payTarget";
+/** Profile gaps, most important first. Only a draft can miss its headline role or location. */
+export type Missing = "headlineRole" | "location" | "years" | "payTarget";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
@@ -49,8 +50,9 @@ export type MpcRow = {
   ownerName: string;
   ownerRemoved: boolean;
   status: MpcStatus;
-  headlineRole: string;
-  location: string;
+  /** Null only while the MPC is a draft. */
+  headlineRole: string | null;
+  location: string | null;
   yearsExperience: number | null;
   payTarget: number | null;
   consentOnFile: boolean;
@@ -96,6 +98,8 @@ export async function listMpcs(member: Member, filter: MpcFilter): Promise<MpcRo
 
     return rows.map((r) => {
       const missing: Missing[] = [];
+      if (r.headlineRole === null) missing.push("headlineRole");
+      if (r.location === null) missing.push("location");
       if (r.yearsExperience === null) missing.push("years");
       if (r.payTarget === null) missing.push("payTarget");
       return {
@@ -123,8 +127,9 @@ export type MpcDetail = {
   ownerRemoved: boolean;
   status: MpcStatus;
   pauseReason: string | null;
-  headlineRole: string;
-  location: string;
+  /** Null only while the MPC is a draft. */
+  headlineRole: string | null;
+  location: string | null;
   yearsExperience: number | null;
   seniority: string | null;
   specialtyTags: string[];

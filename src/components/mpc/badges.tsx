@@ -1,6 +1,7 @@
 import type { MpcStatus } from "@/lib/mpc/schema";
 
 const STATUS_LABEL: Record<MpcStatus, string> = {
+  draft: "Draft",
   active: "Active",
   paused: "Paused",
   removed: "Removed",
@@ -8,6 +9,7 @@ const STATUS_LABEL: Record<MpcStatus, string> = {
 };
 
 const STATUS_TONE: Record<MpcStatus, string> = {
+  draft: "border-flag text-flag",
   active: "border-ok text-ok",
   paused: "border-line text-text-soft",
   removed: "border-line text-muted",
@@ -42,5 +44,14 @@ export function MpcFlags({
         <FlagBadge>{interviewOnlyCount === 1 ? "1 fact to confirm" : `${interviewOnlyCount} facts to confirm`}</FlagBadge>
       )}
     </>
+  );
+}
+
+/** Shown at the top of a draft MPC's page. */
+export function DraftBanner() {
+  return (
+    <p role="status" className="rounded border border-flag bg-card p-4 text-sm text-text">
+      This MPC is a draft. Add the headline role and location to activate it.
+    </p>
   );
 }

@@ -12,13 +12,14 @@ import { ProfileReadOnly } from "@/components/mpc/profile-readonly";
 import { ReassignControl } from "@/components/mpc/reassign-control";
 import { Section } from "@/components/mpc/section";
 import { StatusControls } from "@/components/mpc/status-controls";
-import { FlagBadge } from "@/components/mpc/badges";
+import { DraftBanner, FlagBadge } from "@/components/mpc/badges";
 import { PageTitle } from "@/components/shell/page-title";
 import { requireMember } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { listDocuments, listFacts } from "@/lib/mpc/document-queries";
 import { listConsents, listCredentials, listRestrictions } from "@/lib/mpc/fact-queries";
 import { getMpc, listActiveMembers } from "@/lib/mpc/queries";
+import { mpcTitle } from "@/lib/mpc/schema";
 
 export const metadata: Metadata = { title: "MPC" };
 
@@ -71,19 +72,21 @@ export default async function MpcPage({ params }: Props) {
           Back to MPCs
         </Link>
         <div className="mt-2 [overflow-wrap:anywhere]">
-          <PageTitle>{mpc.headlineRole}</PageTitle>
+          <PageTitle>{mpcTitle(mpc.headlineRole)}</PageTitle>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StatusBadge status={mpc.status} />
           {mpc.ownerRemoved && <FlagBadge>Owner removed</FlagBadge>}
           <span className="text-sm text-text-soft [overflow-wrap:anywhere]">
-            {mpc.location} · Owner: {mpc.ownerName}
+            {mpc.location ? `${mpc.location} · ` : ""}Owner: {mpc.ownerName}
           </span>
         </div>
         {mpc.status === "paused" && mpc.pauseReason && (
           <p className="mt-2 text-sm text-text-soft [overflow-wrap:anywhere]">Paused: {mpc.pauseReason}</p>
         )}
       </div>
+
+      {mpc.status === "draft" && <DraftBanner />}
 
       {!canEdit && (
         <p className="rounded border border-line bg-card p-4 text-sm text-text-soft">
@@ -96,6 +99,7 @@ export default async function MpcPage({ params }: Props) {
           <ProfileForm
             key={mpc.updatedAt.toISOString()}
             mpcId={mpc.id}
+            draft={mpc.status === "draft"}
             initial={{
               headlineRole: mpc.headlineRole,
               location: mpc.location,
