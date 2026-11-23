@@ -72,12 +72,15 @@ The founder handed over the how ("start building"). A was chosen because it is t
 ## 6. MPCs (candidates)
 
 ### Adding and editing
-- Add an MPC by any mix of: pasting text, uploading a resume (PDF, Word), pasting or uploading interview notes and call transcripts, or importing from the connected ATS.
+- **Sources first (founder decision, 2026-11-23).** Add MPC starts with the recruiter's material, not a form: upload or paste any mix of resume (PDF, Word), interview notes and call transcripts, several at once. "Build profile" immediately saves a **Draft** MPC holding those documents, runs AI extraction, and shows the review. Nothing typed by hand is required to start.
+- A Draft becomes **Active** automatically as soon as its required fields (headline role and location) are filled, from extraction or by hand. Until then the MPC page highlights the missing required fields in amber and the list shows a "Draft" badge. Drafts are never researched, drafted or pitched.
+- If extraction cannot run (rate limit, outage, missing key), the Draft and its documents are still saved and the recruiter fills the profile by hand or retries.
+- MPCs can also come from the connected ATS (Plan 6), landing as Drafts the same way.
 - **Find more:** RGE searches the public web (firm bio, bar or license listings, published cases, articles, awards) and brings back facts with a source link for each.
 - AI builds a structured profile. Every field and fact shows its source. The recruiter can edit, replace, add or delete anything at any time, including replacing the resume.
 
 ### Structured profile (industry-agnostic)
-- Status: active, paused (with reason), removed. Placed is terminal.
+- Status: draft, active, paused (with reason), removed. Placed is terminal. Headline role and location may be empty only while Draft.
 - Headline role type (used in subject lines and the opening line), location, years of experience, seniority.
 - Industry and specialty tags (practice area for legal, unit for nursing, stack for engineering, and so on).
 - Credentials: licenses, admissions, certifications, each with region and whether verified.
@@ -87,6 +90,12 @@ The founder handed over the how ("start building"). A was chosen because it is t
 - **Restrictions** (hard, the drafting AI cannot override): never-say phrases, confidential fields (for example current employer), excluded companies, region exclusions (for example "no roles requiring an Arizona license").
 - Overlap priority with other MPCs (which MPC wins when two target the same company).
 - Missing key fields (years, pay target) show as flags.
+
+### Sample pitch (founder decision, 2026-11-23)
+- Every MPC page has a **Sample pitch** card: an example pitch drafted from that MPC's usable and confirmed facts with the agency pitch template, using the speculative form (subject from the headline role, `[First Name]` left as a placeholder, no company). It runs through the same draft guard as real drafts (section 8) and is never sent.
+- Readiness flag on the MPC list and page: **Pitch ready** when three strong usable or confirmed facts exist; **Needs facts** otherwise, with the reason ("Only 2 strong facts. Confirm a note or run Find more.").
+- Controls: Regenerate; Swap a bullet (choose a different fact for one of the three); **Use these bullets**, which saves the recruiter's preferred three facts on the MPC. Real drafts (Plan 4) start from the saved bullets and change one only when a specific company calls for it. Editing or deleting a saved fact clears it from the saved bullets.
+- Generating a sample counts as a paid AI call (metered and rate limited like extraction).
 
 ### Consent
 - Each MPC has a consent record: date, method (verbal, email, signed form), optional uploaded proof.
@@ -260,18 +269,21 @@ Reference mockups: `private/mockups/approvals-mobile-v2.png` (phone), `approvals
 - **Lost** can be set at any stage with a short reason. Opt-outs are a separate list, not Lost.
 - Each lead: company, contact, MPC, recruiter, stage, notes, value. Value defaults to the agency's **average fee** (set in CRM settings) and can be overridden per lead.
 - Pipeline value = sum of value × stage chance; shown in total and per stage.
-- Views: pipeline board (desktop) and stage list (phone); Opt-outs and bounces list; Lost list.
+- Views: pipeline board (desktop) and stage list (phone); Lost list. Deal numbers (agreements sent and signed, pipeline value) live here.
 
-## 14. Dashboard and numbers
+## 14. Campaign tab (founder decision, 2026-11-23; replaces the separate Sent, Opt-outs and Dashboard tabs)
 
 - Health strip at the top: "Research ran 5:02 AM · 74 drafts · 2 inboxes healthy · next send 9:00."
-- Metrics with day, week and month ranges, filterable by recruiter and by MPC:
+- **Performance**, with day, week and month ranges, filterable by recruiter and by MPC:
   - Sending: pitches sent, follow-ups sent, sends queued for tomorrow.
   - Replies: human reply rate, interested replies, calls booked, open rate (estimated, only if tracking is on).
-  - Deals: agreements sent, agreements signed, pipeline value.
   - Research: prospects found vs target, shortfalls, exhausted MPCs, data-provider lookups used.
-- Per-MPC roll-up ("40 pitched, 6 replies, 2 calls").
+  - Per-MPC roll-up ("40 pitched, 6 replies, 2 calls").
+- **Activity:** every sent pitch and follow-up with its status (sent, replied, followed up, bounced, failed).
+- **Opt-outs and bounces:** the agency's permanent do-not-email list.
+- **Errors:** sends and research steps that failed, with the reason and whether RGE will retry.
 - Owners and Admins see per-recruiter and team totals.
+- Until sending exists (Plans 2 to 5), each section shows an empty state saying what will appear there.
 
 ## 15. Notifications
 
@@ -284,7 +296,7 @@ Reference mockups: `private/mockups/approvals-mobile-v2.png` (phone), `approvals
 - Templates: pitch, follow-up 1, breakup, opt-out line.
 - Inboxes: connect, signature, daily cap (calculated, shown), warm-up status, open tracking.
 - Integrations: data provider (Apollo first, ZoomInfo next), ATS (Loxo first, then Bullhorn and others), Google Calendar.
-- Team: users, roles.
+- Team (a section of Settings, not its own tab): users, roles, invites. Recruiters see it read-only.
 
 ## 17. Integrations
 
@@ -317,7 +329,7 @@ Import from `private/`: the MPC roster (21 active, removals and holds as statuse
 - Dark by default; light theme uses the light logo variants.
 - Logo: mark-only icon for favicon and collapsed nav; slim header logo for the top bar. Assets from the RGE logo package (copied into the app at build time).
 - Desktop and phone are equal priorities. Every screen is designed and checked at both sizes before it counts as done.
-- Navigation: Approvals, MPCs, Pipeline, Sent, Opt-outs, Dashboard, Team, Settings. Phone uses a bottom tab bar for the first four and a menu for the rest.
+- Navigation (founder decision, 2026-11-23): Approvals, MPCs, Pipeline, Campaign, Settings. Five tabs on every size; phone shows all five in the bottom bar with no menu sheet. Team lives inside Settings.
 
 ## 21. Reliability
 
