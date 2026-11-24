@@ -676,3 +676,20 @@ Done once, so nothing is imported twice while the bots keep running.
 
    Record the counts (numbers only) here.
 5. **Then the first RGE send.** Plan 5 owns the send.
+
+## Deploy outcome (2026-11-24)
+
+- Built task by task with a review after each task, then a whole-branch review and one fix wave. 477 unit tests and the settings and campaign e2e specs pass.
+- Production migrated (17 migrations). The 8 new tables have RLS enabled and forced. `rge_app` has no UPDATE or DELETE on `suppressions` or `ledger_events`.
+- `RGE_TOKEN_KEY` and `CRON_SECRET` are set on Vercel (production and preview). The Google client ID and secret wait for cutover.
+- Deploy 67a41af is READY in pdx1, and the 5-minute cron was accepted.
+  - The cron route answers 401 without the secret.
+  - With the secret it returns `{"inboxes":0,"inserted":0}`, which also confirms the `rge_runtime` database login works.
+  - There are no runtime errors.
+
+Open items for later plans and cutover:
+- **Imported sends vs Gmail-synced sends.** The same send can appear twice under different dedupe keys. Imported rows carry `gmail_message_id` when the CSV has one. Plan 6 KPIs must de-duplicate by message id.
+- **Historic declines** are not imported. At cutover, check whether WR's outcomes file has decline rows.
+- **Bounces without `X-Failed-Recipients`** (for example Microsoft) are not detected from history. Plan 5 reply classification covers them going forward.
+- **Inbox reassignment.** A former teammate's inbox can't be reassigned; this needs an admin tool if it ever comes up.
+- Deferred minor findings are in the final review triage; none blocks cutover.
