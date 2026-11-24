@@ -14,6 +14,13 @@ describe("isPublicPath (proxy allow-list)", () => {
     }
   });
 
+  test("/api/cron/gmail-sync is public to the proxy", () => {
+    // The route checks CRON_SECRET itself; Clerk would otherwise block Vercel's cron call.
+    expect(isPublicPath("/api/cron/gmail-sync", "production")).toBe(true);
+    expect(isPublicPath("/api/cron", "production")).toBe(false);
+    expect(isPublicPath("/api/cronx/gmail-sync", "production")).toBe(false);
+  });
+
   test("everything else is protected", () => {
     for (const p of [
       "/",

@@ -1,5 +1,6 @@
 /** Paths the proxy lets through without a signed-in user. Everything else requires sign-in. */
-const PUBLIC_PREFIXES = ["/sign-in", "/api/webhooks/", "/brand/"];
+// /api/cron/ routes check CRON_SECRET themselves (Vercel Cron carries no Clerk session).
+const PUBLIC_PREFIXES = ["/sign-in", "/api/webhooks/", "/api/cron/", "/brand/"];
 const PUBLIC_EXACT = ["/manifest.webmanifest"];
 
 const under = (pathname: string, prefix: string) =>

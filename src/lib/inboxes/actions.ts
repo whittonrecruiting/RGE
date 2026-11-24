@@ -8,6 +8,7 @@ import { requireMember, type Member } from "@/lib/auth";
 import { googleApi } from "@/lib/google/client";
 import { decryptToken } from "@/lib/google/crypto";
 import { can } from "@/lib/permissions";
+import { syncInbox, type SyncOutcome } from "@/lib/gmail-sync/sync-inbox";
 
 export type InboxActionResult = { ok: true } | { ok: false; error: string };
 
@@ -15,6 +16,10 @@ const NOT_FOUND = "Inbox not found.";
 const NO_PERMISSION = "You do not have permission to manage this inbox.";
 const NOT_CONNECTED = "Reconnect this inbox before making it primary.";
 const FAILED = "That did not work. Try again.";
+const NOT_SYNCABLE = "Reconnect this inbox before syncing it.";
+
+/** A manual sync stops starting new pages after this long, well inside a server action's time limit. */
+const SYNC_NOW_MS = 50_000;
 
 const fail = (error: string): InboxActionResult => ({ ok: false, error });
 
@@ -84,4 +89,23 @@ export async function setPrimaryInbox(inboxId: string): Promise<InboxActionResul
   }
   revalidatePath("/settings");
   return { ok: true };
+}
+
+export type SyncNowResult = { ok: true; outcome: SyncOutcome } | { ok: false; error: string };
+
+/** Runs one sync of the inbox now, for up to 50 seconds. A partial run (outcome "more") is finished by the cron. */
+export async function syncInboxNow(inboxId: string): Promise<SyncNowResult> {
+  const member = await requireMember();
+  const found = await manageable(member, inboxId);
+  if ("error" in found) return { ok: false, error: found.error };
+  if (found.inbox.status !== "connected") return { ok: false, error: NOT_SYNCABLE };
+
+  let outcome: SyncOutcome;
+  try {
+    outcome = await syncInbox(member.agencyId, inboxId, Date.now() + SYNC_NOW_MS);
+  } catch {
+    return { ok: false, error: FAILED };
+  }
+  revalidatePath("/settings");
+  return { ok: true, outcome };
 }
