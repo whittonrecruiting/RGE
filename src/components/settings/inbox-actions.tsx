@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { dangerButton, primaryButton, quietButton } from "@/components/mpc/ui";
 import { disconnectInbox, setPrimaryInbox, syncInboxNow } from "@/lib/inboxes/actions";
+import { syncMessage } from "@/lib/inboxes/sync-message";
 
 type Props = {
   inboxId: string;
@@ -19,24 +20,26 @@ export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: 
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
 
-  function run(task: () => Promise<{ ok: boolean; error?: string }>, okText: string | null) {
+  const [running, setRunning] = useState<"sync" | "primary" | "disconnect" | null>(null);
+
+  function run(which: "primary" | "disconnect", task: () => Promise<{ ok: boolean; error?: string }>) {
     setMessage(null);
+    setRunning(which);
     start(async () => {
       const result = await task();
-      if (!result.ok)
-        setMessage({
-          tone: "error",
-          text: result.error ?? "That did not work. Try again.",
-        });
-      else if (okText) setMessage({ tone: "ok", text: okText });
+      if (!result.ok) setMessage({ tone: "error", text: result.error ?? "That did not work. Try again." });
+      setRunning(null);
     });
   }
 
-  const onSync = () =>
-    run(async () => {
-      const r = await syncInboxNow(inboxId);
-      return r.ok ? { ok: true } : { ok: false, error: r.error };
-    }, "Sync finished.");
+  function onSync() {
+    setMessage(null);
+    setRunning("sync");
+    start(async () => {
+      setMessage(syncMessage(await syncInboxNow(inboxId)));
+      setRunning(null);
+    });
+  }
 
   function onDisconnect() {
     if (
@@ -45,7 +48,7 @@ export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: 
       )
     )
       return;
-    run(() => disconnectInbox(inboxId), null);
+    run("disconnect", () => disconnectInbox(inboxId));
   }
 
   const live = status === "connected";
@@ -54,13 +57,13 @@ export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: 
       <div className="flex flex-wrap items-center gap-2">
         {live && (
           <button type="button" onClick={onSync} disabled={pending} className={quietButton}>
-            {pending ? "Working" : "Sync now"}
+            {running === "sync" ? "Working" : "Sync now"}
           </button>
         )}
         {live && !isPrimary && (
           <button
             type="button"
-            onClick={() => run(() => setPrimaryInbox(inboxId), null)}
+            onClick={() => run("primary", () => setPrimaryInbox(inboxId))}
             disabled={pending}
             className={quietButton}
           >
