@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { withAgency } from "@/db/with-agency";
-import { parseCsv, parseDncCsv } from "@/lib/dnc/csv";
+import { parseCsv } from "@/lib/csv";
+import { parseDncCsv } from "@/lib/dnc/csv";
 import { addDncEntry, importDncCsv, removeDncEntry } from "@/lib/dnc/actions";
 import { listDnc, upsertDncEntries } from "@/lib/dnc/queries";
 import { doNotContactMatch } from "@/lib/ledger/checks";

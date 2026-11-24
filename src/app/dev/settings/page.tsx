@@ -5,6 +5,7 @@ import { SettingsForm } from "@/components/settings/settings-form";
 import { InboxesSection, inboxNotice } from "@/components/settings/inboxes-section";
 import type { InboxView } from "@/lib/inboxes/queries";
 import { DncSection } from "@/components/settings/dnc-section";
+import { ImportSection } from "@/components/settings/import-section";
 import type { DncEntry } from "@/lib/dnc/queries";
 import { TeamSection, type TeamPerson } from "@/components/settings/team-section";
 import { DEFAULT_SETTINGS, type Settings } from "@/lib/settings-defaults";
@@ -110,6 +111,18 @@ const dncEntries: DncEntry[] = [
   },
 ];
 
+const importPreview = {
+  rows: 4321,
+  newEvents: 4100,
+  newSuppressions: 12,
+  dncAdded: 3,
+  dncMerged: 1,
+  skipped: Array.from({ length: 25 }, (_, i) => ({
+    line: i + 2,
+    reason: i === 0 ? `status ${"x".repeat(100)} not imported` : "Date or time not recognized",
+  })),
+};
+
 type Props = {
   searchParams: Promise<{
     view?: string;
@@ -135,6 +148,7 @@ export default async function DevSettingsPage({ searchParams }: Props) {
         />
         <TeamSection people={shown} canInvite={!readonly} />
         <DncSection entries={dncEntries} canEdit={!readonly} />
+        {!readonly && <ImportSection initial={{ mode: "preview", summary: importPreview }} />}
         <SettingsForm settings={sample} canEdit={!readonly} />
       </div>
     </AppShell>

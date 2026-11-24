@@ -47,6 +47,7 @@ test("Inboxes then Team come first and the rest follow in order", async ({ page 
     "Team",
     "Invite a teammate",
     "Do-not-contact companies",
+    "Import history",
     "Agency",
     "Rules",
     "CRM",
@@ -179,4 +180,26 @@ test("removing a company asks for confirmation", async ({ page }) => {
   });
   await page.locator("#do-not-contact").getByRole("button", { name: "Remove Sample Marketplace Client Number 1", exact: true }).click();
   expect(asked).toContain("Remove Sample Marketplace Client Number 1 from the list?");
+});
+
+for (const vp of [
+  { w: 390, h: 844, name: "phone" },
+  { w: 1440, h: 900, name: "desktop" },
+]) {
+  test(`import section fits on ${vp.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.w, height: vp.h });
+    await page.goto("/dev/settings");
+    const section = page.locator("#import-history");
+    await expect(section).toBeVisible();
+    await expect(section.getByText("Importing the same file again adds nothing new.")).toBeVisible();
+    await expect(section.getByRole("button", { name: "Preview", exact: true })).toBeVisible();
+    await expect(section.getByRole("button", { name: "Import", exact: true })).toBeVisible();
+    await expect(section.getByText("and 5 more.")).toBeVisible();
+    expect(await overflowReport(page)).toEqual(FITS);
+  });
+}
+
+test("recruiters do not see the import section", async ({ page }) => {
+  await page.goto("/dev/settings?view=readonly");
+  await expect(page.locator("#import-history")).toHaveCount(0);
 });

@@ -3,6 +3,7 @@ import { PageTitle } from "@/components/shell/page-title";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { InboxesSection, inboxNotice } from "@/components/settings/inboxes-section";
 import { DncSection } from "@/components/settings/dnc-section";
+import { ImportSection } from "@/components/settings/import-section";
 import { TeamSection } from "@/components/settings/team-section";
 import { requireMember } from "@/lib/auth";
 import { can } from "@/lib/permissions";
@@ -37,6 +38,7 @@ export default async function SettingsPage({ searchParams }: Props) {
       />
       <TeamSection people={people} canInvite={can(member, "team.manage")} />
       <DncSection entries={dnc} canEdit={can(member, "dnc.edit")} />
+      {can(member, "history.import") && <ImportSection />}
       <SettingsForm settings={settings} canEdit={can(member, "settings.edit")} />
     </div>
   );
