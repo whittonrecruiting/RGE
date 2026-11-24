@@ -27,8 +27,10 @@ export default function proxy(req: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and static files unless found in search params.
-    "/((?!_next|[^?]*\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Skip only Next.js internals and the real static files (public/brand). Skipping by file
+    // extension let a missing file such as /apple-touch-icon.png reach an app page without the
+    // proxy, where the sign-in check fails with a 500 instead of a redirect or 404.
+    "/((?!_next/|brand/).*)",
     "/(api|trpc)(.*)",
   ],
 };

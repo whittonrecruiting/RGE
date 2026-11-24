@@ -147,7 +147,7 @@ test('non-draft update still requires headline role', async () => { expect((awai
 
 Plan 1.5 shipped to production on 2026-11-23 (migrations 0010-0013 applied, commit b345982). Minor review items deferred during the build, none blocking:
 
-- Requests for missing file-like paths (for example `/apple-touch-icon.png`) return 500 instead of 404: the proxy matcher skips static extensions, so the `(app)` layout calls `auth()` without Clerk middleware. Present since Plan 1.
+- Fixed 2026-11-23: missing file-like paths (for example `/apple-touch-icon.png`) returned 500; the proxy matcher now skips only `_next/` and `brand/`.
 - `isCheckViolation` should match the constraint name, not only SQLSTATE 23514.
 - A failed Build profile transaction can leave orphan blobs; sources are processed one at a time; pasted text size is counted in characters, not bytes.
 - The CHANGED (concurrent edit) path in Build profile is untested.
