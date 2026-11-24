@@ -32,7 +32,7 @@ function zoneOffsetMs(utcMs: number, timeZone: string): number {
 
 /** The instant at which the zone's wall clock reads the given fields; null when a field is out of range. */
 function wallToDate(y: number, mo: number, d: number, h: number, mi: number, s: number, timeZone: string): Date | null {
-  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 59) return null;
+  if (y < 1900 || mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 59) return null;
   const guess = Date.UTC(y, mo - 1, d, h, mi, s);
   const check = new Date(guess);
   if (check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null; // e.g. Feb 30
@@ -56,6 +56,9 @@ export function parseWallTime(raw: string, timeZone: string): Date | null {
   if (!s) return null;
   try {
     if (ISO_WITH_OFFSET.test(s)) {
+      const f = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(s)!;
+      // Check the written calendar fields first: Date would roll Feb 30 over to Mar 2.
+      if (wallToDate(Number(f[1]), Number(f[2]), Number(f[3]), Number(f[4]), Number(f[5]), Number(f[6] ?? 0), "UTC") === null) return null;
       const d = new Date(s.replace(" ", "T").replace(/\s+/g, ""));
       return Number.isNaN(d.getTime()) ? null : d;
     }

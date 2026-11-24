@@ -73,7 +73,7 @@ describe("csv helpers", () => {
   });
 
   test("parseWallTime rejects anything else", () => {
-    for (const bad of ["", "tomorrow", "2026-13-40", "2026-02-30", "13/40/2026", "2026-11-18 25:00", "18 Nov 2026"]) {
+    for (const bad of ["", "tomorrow", "2026-13-40", "2026-02-30", "13/40/2026", "2026-11-18 25:00", "18 Nov 2026", "2026-02-30T10:00:00Z", "2026-04-31T08:00:00-07:00", "0026-01-01"]) {
       expect(parseWallTime(bad, PHX)).toBeNull();
     }
   });
