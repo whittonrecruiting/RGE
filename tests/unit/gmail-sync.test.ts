@@ -336,20 +336,20 @@ describe("syncInbox", () => {
   });
 
   test("a gmail.com inbox records other gmail.com addresses but not the agency's own inboxes", async () => {
-    // Made-up local parts; gmail.com is needed because it is on the free-mail list.
-    const id = await seedInbox(f.agency.id, f.recA.userId, { email: "recruiter.example@gmail.com" });
-    await seedInbox(f.agency.id, f.recB.userId, { email: "colleague.example@gmail.com" }, false);
+    // Synthetic rge-fixture local parts; gmail.com is needed because it is on the free-mail list.
+    const id = await seedInbox(f.agency.id, f.recA.userId, { email: "rge-fixture-recruiter@gmail.com" });
+    await seedInbox(f.agency.id, f.recB.userId, { email: "rge-fixture-colleague@gmail.com" }, false);
     const g = (id: string, headers: Record<string, string>, labelIds: string[]): GmailMeta => ({ id, threadId: `t-${id}`, internalDate: at(1), labelIds, headers });
-    fake.messages.set("g1", g("g1", { to: "candidate.example@gmail.com, colleague.example@gmail.com" }, ["SENT"]));
-    fake.messages.set("g2", g("g2", { from: "Casey Example <candidate.two@gmail.com>" }, ["INBOX"]));
-    fake.messages.set("g3", g("g3", { from: "colleague.example@gmail.com" }, ["INBOX"]));
+    fake.messages.set("g1", g("g1", { to: "rge-fixture-candidate-1@gmail.com, rge-fixture-colleague@gmail.com" }, ["SENT"]));
+    fake.messages.set("g2", g("g2", { from: "Casey Example <rge-fixture-candidate-2@gmail.com>" }, ["INBOX"]));
+    fake.messages.set("g3", g("g3", { from: "rge-fixture-colleague@gmail.com" }, ["INBOX"]));
     fake.sent = ["g1"];
     fake.received = ["g2", "g3"];
     const out = await syncInbox(f.agency.id, id, FAR(), fake);
     expect(out).toEqual({ status: "done", inserted: 2 });
     expect((await events()).map((e) => [e.type, e.email]).sort()).toEqual([
-      ["received", "candidate.two@gmail.com"],
-      ["sent", "candidate.example@gmail.com"],
+      ["received", "rge-fixture-candidate-2@gmail.com"],
+      ["sent", "rge-fixture-candidate-1@gmail.com"],
     ]);
   });
 

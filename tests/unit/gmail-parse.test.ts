@@ -142,26 +142,26 @@ describe("messageToInputs", () => {
   });
 
   test("a gmail.com inbox still records mail to and from other gmail.com addresses, but not itself", () => {
-    // Made-up local parts; gmail.com is needed because it is on the free-mail list.
+    // Synthetic rge-fixture local parts; gmail.com is needed because it is on the free-mail list.
     const gctx = {
       inboxId: "inbox-g",
-      inboxEmail: "Recruiter.Example@gmail.com",
+      inboxEmail: "RGE-Fixture-Recruiter@gmail.com",
       userId: "user-1",
       ownDomains: ["gmail.com", "example.com"],
-      ownAddresses: ["colleague.example@gmail.com"],
+      ownAddresses: ["rge-fixture-colleague@gmail.com"],
     };
     const sent = messageToInputs(
       meta({
         labelIds: ["SENT"],
-        headers: { to: "candidate.example@gmail.com, recruiter.example@gmail.com", cc: "colleague.example@gmail.com, sam@example.com" },
+        headers: { to: "rge-fixture-candidate-1@gmail.com, rge-fixture-recruiter@gmail.com", cc: "rge-fixture-colleague@gmail.com, sam@example.com" },
       }),
       gctx,
     );
-    expect(sent.map((i) => [i.type, i.email])).toEqual([["sent", "candidate.example@gmail.com"]]);
-    const received = messageToInputs(meta({ headers: { from: "Casey Example <candidate.example@gmail.com>" } }), gctx);
-    expect(received.map((i) => [i.type, i.email])).toEqual([["received", "candidate.example@gmail.com"]]);
-    expect(messageToInputs(meta({ headers: { from: "recruiter.example@gmail.com" } }), gctx)).toEqual([]);
-    expect(messageToInputs(meta({ headers: { from: "colleague.example@gmail.com" } }), gctx)).toEqual([]);
+    expect(sent.map((i) => [i.type, i.email])).toEqual([["sent", "rge-fixture-candidate-1@gmail.com"]]);
+    const received = messageToInputs(meta({ headers: { from: "Casey Example <rge-fixture-candidate-1@gmail.com>" } }), gctx);
+    expect(received.map((i) => [i.type, i.email])).toEqual([["received", "rge-fixture-candidate-1@gmail.com"]]);
+    expect(messageToInputs(meta({ headers: { from: "rge-fixture-recruiter@gmail.com" } }), gctx)).toEqual([]);
+    expect(messageToInputs(meta({ headers: { from: "rge-fixture-colleague@gmail.com" } }), gctx)).toEqual([]);
   });
 
   test("mail from an own domain, drafts and spam give nothing", () => {

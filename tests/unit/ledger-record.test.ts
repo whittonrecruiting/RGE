@@ -55,7 +55,7 @@ describe("recordEvents", () => {
         tx,
         a.id,
         [
-          input({ email: "someone@gmail.com", dedupeKey: "k1" }),
+          input({ email: "rge-fixture-candidate-1@gmail.com", dedupeKey: "k1" }),
           input({ email: "me@own-example.org", dedupeKey: "k2" }),
           input({ email: "not an address", dedupeKey: "k3" }),
         ],
@@ -144,7 +144,7 @@ describe("recordEvents invariants", () => {
       await recordEvents(
         tx,
         a.id,
-        [{ type: "agreement_signed", email: "owner@gmail.com", companyName: "Fabrikam Example", occurredAt: new Date("2026-11-02T00:00:00Z"), source: "manual", dedupeKey: "f1" }],
+        [{ type: "agreement_signed", email: "rge-fixture-owner@gmail.com", companyName: "Fabrikam Example", occurredAt: new Date("2026-11-02T00:00:00Z"), source: "manual", dedupeKey: "f1" }],
         { ownDomains: [] },
       );
       const co = await tx.select().from(companies);
@@ -163,13 +163,13 @@ describe("ownDomains", () => {
         { ...base, email: "One@Own-Example.org", status: "connected" as const },
         { ...base, email: "two@own-example.org", status: "disconnected" as const },
         { ...base, email: "three@other-example.net", status: "connected" as const },
-        { ...base, email: "Recruiter.Example@Gmail.com", status: "connected" as const },
+        { ...base, email: "RGE-Fixture-Recruiter@Gmail.com", status: "connected" as const },
       ]);
       // A free-mail inbox never makes its whole domain "own".
       expect((await ownDomains(tx)).sort()).toEqual(["other-example.net", "own-example.org"]);
       expect((await ownAddresses(tx)).sort()).toEqual([
         "one@own-example.org",
-        "recruiter.example@gmail.com",
+        "rge-fixture-recruiter@gmail.com",
         "three@other-example.net",
         "two@own-example.org",
       ]);
