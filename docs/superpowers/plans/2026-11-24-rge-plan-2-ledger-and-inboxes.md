@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Recruiters connect their Gmail inboxes, RGE builds one agency-wide record of who was emailed and when (from Gmail history and WR's old bot logs), opt-outs and bounces are permanently suppressed, and the do-not-contact company list is maintained by hand or CSV, so that nothing in Plans 3 to 5 can contact someone it should not.
+**Goal:** Recruiters can connect their Gmail inboxes, RGE builds one agency-wide record of who was emailed and when (from Gmail history and WR's old bot logs), opt-outs and bounces are permanently suppressed, and the do-not-contact company list is maintained by hand or CSV, so that nothing in Plans 3 to 5 can contact someone it should not.
 
 **Architecture:**
 - Nine new agency-owned tables under the same row-level security as Plan 1.
@@ -633,31 +633,46 @@ Content per inbox:
 - [ ] **Step 4: Run again.** Expected: PASS. Then run the full `npx vitest run` and `npx playwright test`.
 - [ ] **Step 5: Commit** `feat(import): preview and import WR send logs, follow-ups, outcomes, suppressions and do-not-contact lists`.
 
-### Task 10: Go-live
+### Task 10: Deploy the code (no inboxes connected yet)
 
 **Files:**
 - Modify: `README.md` (new sections "Gmail connection (Google OAuth app)" and "Background sync"), `docs/superpowers/plans/2026-11-24-rge-plan-2-ledger-and-inboxes.md` (record the outcome)
 
-This task needs the founder for steps 1 and 6. Everything else is done by the agent.
+Founder decision, 2026-11-24: no inbox is connected and no history is imported while the bots are still running. The code ships now, and the Connect Gmail button says "Gmail connection is not set up yet" until cutover.
 
-- [ ] **Step 1 (founder): Create the internal Google OAuth app.** The README section lists these exact steps:
-  1. Open Google Cloud Console signed in as a Workspace admin, and create a project "RGE".
-  2. Enable the Gmail API.
-  3. Set up the OAuth consent screen with User type **Internal**, app name "RGE", and the two Gmail scopes.
-  4. Create a Web application client with these redirect URIs:
-     - `https://app.whittonrecruiting.com/api/google/oauth/callback`
-     - `http://localhost:3000/api/google/oauth/callback`
-  5. Paste the client ID and secret to the agent, or into Vercel yourself.
-- [ ] **Step 2: Set the env vars on Vercel.** For production and preview: `GOOGLE_CLIENT_ID` (plain), `GOOGLE_CLIENT_SECRET`, `RGE_TOKEN_KEY` and `CRON_SECRET` (sensitive; the last two freshly generated). Copy them to `.env.local`.
-- [ ] **Step 3: Check the Vercel plan allows the 5-minute cron.** If the team is on Hobby, change the schedule to daily (`0 12 * * *`) and say so; "Sync now" covers the first backfill.
+- [ ] **Step 1: Write the README sections.**
+  - The Google OAuth app setup steps listed under Cutover below.
+  - The env vars.
+  - How the cron and "Sync now" work.
+- [ ] **Step 2: Set the env vars on Vercel.** For production and preview, set `RGE_TOKEN_KEY` and `CRON_SECRET`, both sensitive and freshly generated. Copy them to `.env.local`. The Google client ID and secret wait for cutover.
+- [ ] **Step 3: Check the Vercel plan allows the 5-minute cron.** If the team is on Hobby, change the schedule to daily (`0 12 * * *`) and say so.
 - [ ] **Step 4: Migrate production.** Run `node --env-file=.env.local ./node_modules/drizzle-kit/bin.cjs migrate`. Verify the 9 tables have RLS enabled and forced, and that `has_table_privilege('rge_app', 'suppressions', 'DELETE')` is false.
-- [ ] **Step 5: Push and confirm the deploy.** Push `claude/rge-repository-0nxb3b`, confirm the deployment is READY, and confirm `GET /api/cron/gmail-sync` without the secret returns 401.
-- [ ] **Step 6 (founder): Connect the inbox.** Connect `ryan@` (and any other inbox used for MPC outreach) in Settings. Check that the domain checks show, and press Sync now until history shows as imported. The agent verifies the ledger counts by type with a read-only SQL check, printing no addresses.
-- [ ] **Step 7: Import WR's history.** The founder copies WR's bot files into `private/import/`. The founder, or the agent at the founder's request, previews and imports, in this order:
-  1. suppression lists;
-  2. do-not-contact (the marketplace clients);
-  3. send logs;
-  4. follow-ups;
-  5. outcomes.
-  Record the counts (numbers only) in this plan.
-- [ ] **Step 8: Final whole-branch review** (superpowers:requesting-code-review). Fix the findings, then commit `docs: record Plan 2 go-live`.
+- [ ] **Step 5: Push and confirm the deploy.**
+  - Push `claude/rge-repository-0nxb3b` and confirm the deployment is READY.
+  - Confirm that `GET /api/cron/gmail-sync` without the secret returns 401.
+  - Confirm that a cron run with no connected inboxes returns zero counts and logs no errors.
+- [ ] **Step 6: Final whole-branch review** (superpowers:requesting-code-review). Fix the findings, then commit `docs: record Plan 2 deploy`.
+
+## Cutover (later: once, right before RGE's first real send, after Plan 5 is built)
+
+Done once, so nothing is imported twice while the bots keep running.
+
+1. **Founder: create the internal Google OAuth app.**
+   1. Open Google Cloud Console signed in as a Workspace admin, and create a project "RGE".
+   2. Enable the Gmail API.
+   3. Set up the OAuth consent screen with User type **Internal**, app name "RGE", and the two Gmail scopes.
+   4. Create a Web application client with these redirect URIs:
+      - `https://app.whittonrecruiting.com/api/google/oauth/callback`
+      - `http://localhost:3000/api/google/oauth/callback`
+   5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on Vercel.
+2. **Stop the bots' sending.**
+3. **Founder: connect the inboxes.** Connect `ryan@`, and every other inbox used for MPC outreach, in Settings. Let the sync import history until each inbox shows "History imported". The agent then checks the ledger counts by type with a read-only SQL query that prints no addresses.
+4. **Import WR's final bot files.** The founder copies them into `private/import/`, then they are previewed and imported in this order:
+   1. suppression lists;
+   2. do-not-contact (the marketplace clients);
+   3. send logs;
+   4. follow-ups;
+   5. outcomes.
+
+   Record the counts (numbers only) here.
+5. **Then the first RGE send.** Plan 5 owns the send.
