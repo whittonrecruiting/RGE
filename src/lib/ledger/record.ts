@@ -138,10 +138,15 @@ export async function recordEvents(
             name: sql`coalesce(${contacts.name}, excluded.name)`,
             companyId: sql`coalesce(${contacts.companyId}, excluded.company_id)`,
           },
+          setWhere: sql`${contacts.name} is null or ${contacts.companyId} is null`,
         })
         .returning({ id: contacts.id });
-      contactId = contact!.id;
-    } else if (companyName) {
+      // The conditional update returns no row when nothing needed filling in.
+      contactId =
+        contact?.id ??
+        (await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.agencyId, agencyId), eq(contacts.email, email))))[0]!.id;
+    }
+    if (!companyId && companyName && input.type === "agreement_signed") {
       companyId = await companyForName(tx, agencyId, companyName);
     }
 

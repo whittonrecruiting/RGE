@@ -113,6 +113,47 @@ describe("recordEvents", () => {
   });
 });
 
+describe("recordEvents invariants", () => {
+  test("duplicate or repeated opt-outs leave exactly one suppression, created by recordEvents", async () => {
+    const { a } = await setup();
+    await withAgency(a.id, async (tx) => {
+      const o = input({ type: "opted_out", dedupeKey: "o1" });
+      await recordEvents(tx, a.id, [o, o], { ownDomains: [] });
+      expect(await tx.select().from(suppressions)).toHaveLength(1);
+      const r = await recordEvents(tx, a.id, [input({ type: "bounced", dedupeKey: "o2" })], { ownDomains: [] });
+      expect(r.inserted).toBe(1);
+      const rows = await tx.select().from(suppressions);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.reason).toBe("opted_out");
+    });
+  });
+
+  test("a repeated company-name agreement_signed creates no second company", async () => {
+    const { a } = await setup();
+    await withAgency(a.id, async (tx) => {
+      const ag = (k: string): LedgerInput => ({ type: "agreement_signed", companyName: "Northwind Example LLC", occurredAt: new Date("2026-11-02T00:00:00Z"), source: "manual", dedupeKey: k });
+      await recordEvents(tx, a.id, [ag("a1")], { ownDomains: [] });
+      await recordEvents(tx, a.id, [ag("a2"), ag("a1")], { ownDomains: [] });
+      expect(await tx.select().from(companies)).toHaveLength(1);
+    });
+  });
+
+  test("agreement_signed with a free-mail email and a company name marks the company as client", async () => {
+    const { a } = await setup();
+    await withAgency(a.id, async (tx) => {
+      await recordEvents(
+        tx,
+        a.id,
+        [{ type: "agreement_signed", email: "owner@gmail.com", companyName: "Fabrikam Example", occurredAt: new Date("2026-11-02T00:00:00Z"), source: "manual", dedupeKey: "f1" }],
+        { ownDomains: [] },
+      );
+      const co = await tx.select().from(companies);
+      expect(co).toHaveLength(1);
+      expect(co[0]!.isClient).toBe(true);
+    });
+  });
+});
+
 describe("ownDomains", () => {
   test("returns distinct normalized domains of the agency inboxes", async () => {
     const { a } = await setup();

@@ -78,6 +78,9 @@ describe("read checks", () => {
       expect(r.contactedEmails).toEqual(["pat@acme-example.com", "sam@acme-example.com"]);
       expect(r.declinedAt).toEqual(new Date("2026-10-20T00:00:00Z"));
       expect(r.isClient).toBe(false);
+      await recordEvents(tx, a.id, [ev("sent", "old@acme-example.com", "2026-08-01T00:00:00Z")], { ownDomains: [] });
+      const r2 = await companyActivity(tx, "acme-example.com", new Date("2026-10-01T00:00:00Z"));
+      expect(r2.contactedEmails).not.toContain("old@acme-example.com");
       expect(await companyActivity(tx, "unknown-example.org", new Date("2026-10-01T00:00:00Z"))).toEqual({
         companyId: null,
         contactedEmails: [],
