@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/shell/app-shell";
 import { PageTitle } from "@/components/shell/page-title";
 import { SettingsForm } from "@/components/settings/settings-form";
+import { InboxesSection, inboxNotice } from "@/components/settings/inboxes-section";
+import type { InboxView } from "@/lib/inboxes/queries";
 import { TeamSection, type TeamPerson } from "@/components/settings/team-section";
 import { DEFAULT_SETTINGS, type Settings } from "@/lib/settings-defaults";
 
@@ -30,22 +32,88 @@ const person = (n: number, role: TeamPerson["role"], name: string, email: string
 });
 
 const people: TeamPerson[] = [
-  person(1, "owner", "Sample Owner With A Very Long Display Name", "owner.with.a.very.long.address.for.layout.checks@example.test"),
+  person(
+    1,
+    "owner",
+    "Sample Owner With A Very Long Display Name",
+    "owner.with.a.very.long.address.for.layout.checks@example.test",
+  ),
   person(2, "admin", "Sample Admin", "admin@example.test"),
   person(3, "recruiter", "Sample Recruiter", "recruiter@example.test"),
 ];
 
-type Props = { searchParams: Promise<{ view?: string }> };
+const okCheck = { ok: true, found: "v=ok", fix: null };
+const base: InboxView = {
+  id: "i1",
+  email: "healthy.primary@example.com",
+  ownerName: "Sample Owner",
+  isMine: true,
+  status: "connected",
+  isPrimary: true,
+  hasSignature: true,
+  domainCheck: { spf: okCheck, dkim: okCheck, dmarc: okCheck },
+  backfillFrom: new Date("2025-11-24T17:00:00Z"),
+  backfillDoneAt: new Date("2025-11-25T17:00:00Z"),
+  lastSyncedAt: new Date("2026-11-24T16:05:00Z"),
+  lastSyncError: null,
+  canManage: true,
+};
+const LONG_EMAIL = "a".repeat(67) + "@example.com"; // 80 characters, no break points
+const inboxes: InboxView[] = [
+  base,
+  {
+    ...base,
+    id: "i2",
+    email: "reconnect.needed@example.com",
+    ownerName: "Sample Admin",
+    isMine: false,
+    status: "needs_reconnect",
+    isPrimary: false,
+    domainCheck: {
+      spf: okCheck,
+      dkim: {
+        ok: false,
+        found: null,
+        fix: "Turn on DKIM signing in Google Admin (Apps > Google Workspace > Gmail > Authenticate email) and publish the record.",
+      },
+      dmarc: okCheck,
+    },
+    lastSyncError: "Google rejected the saved connection.",
+  },
+  { ...base, id: "i3", email: LONG_EMAIL, isPrimary: false },
+  {
+    ...base,
+    id: "i4",
+    email: "importing@example.com",
+    isPrimary: false,
+    backfillDoneAt: null,
+    lastSyncedAt: null,
+  },
+];
+
+type Props = {
+  searchParams: Promise<{
+    view?: string;
+    inbox?: string;
+    inbox_error?: string;
+  }>;
+};
 
 export default async function DevSettingsPage({ searchParams }: Props) {
   if (process.env.NODE_ENV === "production") notFound();
-  const { view } = await searchParams;
+  const { view, inbox, inbox_error } = await searchParams;
   const readonly = view === "readonly";
   const shown = readonly ? people.map((p) => ({ ...p, canSetRole: false, canRemove: false })) : people;
   return (
     <AppShell>
       <div className="flex min-w-0 flex-col gap-6">
         <PageTitle>Settings</PageTitle>
+        <InboxesSection
+          inboxes={inboxes}
+          canConnect
+          notice={inboxNotice(inbox, inbox_error)}
+          timeZone={sample.timeZone}
+        />
         <TeamSection people={shown} canInvite={!readonly} />
         <SettingsForm settings={sample} canEdit={!readonly} />
       </div>
