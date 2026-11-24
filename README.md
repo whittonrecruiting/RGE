@@ -34,7 +34,7 @@ Set it back to `false` to suspend an agency.
 
 - **Owner** (the Neon database owner): runs migrations only, over the direct connection `DATABASE_URL_UNPOOLED`. `drizzle.config.ts` refuses to run without it.
 - **rge_app** and **rge_system**: NOLOGIN roles created by the migrations. `withAgency` runs every app query as `rge_app` with the agency set, so row-level security applies; `withSystem` runs Clerk sync and the sign-in lookup as `rge_system`, which reaches only agencies, users and memberships.
-- **Runtime login role** (recommended for production): the role in the pooled `DATABASE_URL`. It owns nothing and has no table grants of its own, is `NOINHERIT`, and is a member of `rge_app` and `rge_system` with the SET option, so it can only work through `SET LOCAL ROLE`. As the owner:
+- **Runtime login role** (`rge_runtime`, used in production since 2026-11-24): the role in the pooled `DATABASE_URL_RUNTIME`. The app falls back to `DATABASE_URL` when it is unset; on Vercel that variable is managed by the Neon integration and connects as the owner, so it is left alone. It owns nothing and has no table grants of its own, is `NOINHERIT`, and is a member of `rge_app` and `rge_system` with the SET option, so it can only work through `SET LOCAL ROLE`. As the owner:
 
 ```sql
 CREATE ROLE rge_runtime LOGIN NOINHERIT PASSWORD '...';
