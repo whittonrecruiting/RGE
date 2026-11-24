@@ -142,3 +142,16 @@ test('non-draft update still requires headline role', async () => { expect((awai
 
 - [ ] Apply 0010 and 0011 to Neon with `node --env-file=.env.local ./node_modules/drizzle-kit/bin.cjs migrate`; verify enum, CHECK constraint, new table RLS forced.
 - [ ] Merge to `claude/rge-repository-0nxb3b`, push (founder's go-ahead), confirm the Vercel production build is READY and `/mpcs/new` loads.
+
+## Open follow-ups (after go-live, 2026-11-23)
+
+Plan 1.5 shipped to production on 2026-11-23 (migrations 0010-0013 applied, commit b345982). Minor review items deferred during the build, none blocking:
+
+- Requests for missing file-like paths (for example `/apple-touch-icon.png`) return 500 instead of 404: the proxy matcher skips static extensions, so the `(app)` layout calls `auth()` without Clerk middleware. Present since Plan 1.
+- `isCheckViolation` should match the constraint name, not only SQLSTATE 23514.
+- A failed Build profile transaction can leave orphan blobs; sources are processed one at a time; pasted text size is counted in characters, not bytes.
+- The CHANGED (concurrent edit) path in Build profile is untested.
+- Number guard: N-figure parsing accepts odd words (first-figure, double-figure); compound spelled numbers are split with a confusing message; fact magnitude wording must match exactly.
+- Plan 4 must re-run the pitch guard on saved bullets at send time, not trust them.
+- `TeamPerson` type is imported from UI into lib; the dev campaign fixture page duplicates the page body; no per-tab label clip check at 390px.
+- `MpcDraftInput` full-replace semantics need a comment.
