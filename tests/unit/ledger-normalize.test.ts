@@ -53,6 +53,11 @@ describe("normalizeCompanyName", () => {
     expect(normalizeCompanyName("smith and jones llp")).toBe(a);
     expect(normalizeCompanyName("Acme Co. Inc.")).toBe("acme");
   });
+  test("hyphens, slashes and dots separate words", () => {
+    expect(normalizeCompanyName("Smith-Jones LLP")).toBe(normalizeCompanyName("Smith Jones"));
+    expect(normalizeCompanyName("Smith/Jones, LLP")).toBe("smith jones");
+    expect(normalizeCompanyName("L.L.P.")).toBe("llp");
+  });
 });
 
 describe("matchesDoNotContact", () => {
@@ -66,6 +71,10 @@ describe("matchesDoNotContact", () => {
   });
   test("matches by subdomain", () => {
     expect(matchesDoNotContact(entry, { domain: "us.smithjones-example.com" })).toBe(true);
+  });
+  test("matches a hyphenated entry against the spaced name", () => {
+    const hyphen = { name: "Smith-Jones", domains: [], aliases: [] };
+    expect(matchesDoNotContact(hyphen, { name: "Smith Jones LLP" })).toBe(true);
   });
   test("does not match partial name overlap", () => {
     expect(matchesDoNotContact(entry, { name: "Jones" })).toBe(false);

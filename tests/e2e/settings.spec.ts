@@ -90,6 +90,13 @@ test("failing DKIM shows its fix text", async ({ page }) => {
   await expect(card.getByText("Reconnect needed")).toBeVisible();
 });
 
+test("a teammate's reconnect-needed inbox asks the owner instead of linking", async ({ page }) => {
+  await page.goto("/dev/settings");
+  const card = page.locator("#inboxes li", { hasText: "teammate.reconnect@example.com" });
+  await expect(card.getByText("Ask the owner to reconnect.")).toBeVisible();
+  await expect(card.getByRole("link", { name: "Reconnect" })).toHaveCount(0);
+});
+
 test("reconnect needed shows a Reconnect link to the OAuth start", async ({ page }) => {
   await page.goto("/dev/settings");
   const card = page.locator("#inboxes li", {

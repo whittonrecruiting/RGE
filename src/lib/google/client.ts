@@ -82,6 +82,11 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
         throw new GoogleApiError(`Google ${op} failed: network error`);
       }
       if (retry && (res.status === 429 || res.status >= 500) && attempt < BACKOFF_MS.length) {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // The body is discarded either way.
+        }
         await sleep(BACKOFF_MS[attempt]);
         continue;
       }

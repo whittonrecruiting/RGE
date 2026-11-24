@@ -3,7 +3,7 @@
 // withAgency transaction, so a sync can stop at any page boundary and resume without duplicates.
 
 import { and, eq, isNull } from "drizzle-orm";
-import { inboxCredentials, inboxes } from "@/db/schema";
+import { inboxCredentials, inboxes, memberships } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
 import { GoogleApiError, GoogleAuthError, googleApi, type GmailMeta, type GoogleApi } from "@/lib/google/client";
 import { decryptToken } from "@/lib/google/crypto";
@@ -90,6 +90,11 @@ async function loadInbox(agencyId: string, inboxId: string): Promise<InboxState 
       .leftJoin(inboxCredentials, eq(inboxCredentials.inboxId, inboxes.id))
       .where(eq(inboxes.id, inboxId));
     if (!row) return undefined;
+    const [owner] = await tx
+      .select({ status: memberships.status })
+      .from(memberships)
+      .where(and(eq(memberships.agencyId, agencyId), eq(memberships.userId, row.userId)));
+    if (owner?.status !== "active") return { ...row, status: "owner_removed", ownDomains: [], ownAddresses: [] };
     return { ...row, ownDomains: await ownDomains(tx), ownAddresses: await ownAddresses(tx) };
   });
 }
@@ -108,6 +113,7 @@ export async function syncInbox(agencyId: string, inboxId: string, deadline: num
     return { status: "error", inserted: 0, error: GENERIC_ERROR };
   }
   if (!inbox) return { status: "error", inserted: 0, error: "Inbox not found." };
+  if (inbox.status === "owner_removed") return { status: "error", inserted: 0, error: "The inbox owner is no longer an active member." };
   if (inbox.status === "needs_reconnect") return { status: "needs_reconnect", inserted: 0 };
   if (inbox.status !== "connected" || !inbox.refreshTokenEnc) return { status: "error", inserted: 0, error: "Inbox is not connected." };
 

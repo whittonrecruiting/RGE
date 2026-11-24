@@ -79,9 +79,13 @@ export function verifyOAuthState(state: string, now = Date.now()): { agencyId: s
   const payload = state.slice(0, dot);
   const sig = state.slice(dot + 1);
   const expected = hmac(payload);
-  if (sig !== expected.toString("base64url")) return null;
+  // Canonical form only: decode, then require the bytes to re-encode to the exact text given. No plain
+  // string comparison of the signature remains; the comparison is timingSafeEqual on equal-length bytes.
   const given = Buffer.from(sig, "base64url");
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  const canonical = Buffer.from(given.toString("base64url"));
+  const supplied = Buffer.from(sig);
+  if (given.length !== expected.length || canonical.length !== supplied.length || !timingSafeEqual(canonical, supplied)) return null;
+  if (!timingSafeEqual(given, expected)) return null;
   let data: Partial<StateParts>;
   try {
     data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));

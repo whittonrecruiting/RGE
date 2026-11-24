@@ -69,7 +69,7 @@ const inboxes: InboxView[] = [
     id: "i2",
     email: "reconnect.needed@example.com",
     ownerName: "Sample Admin",
-    isMine: false,
+    isMine: true,
     status: "needs_reconnect",
     isPrimary: false,
     domainCheck: {
@@ -84,6 +84,15 @@ const inboxes: InboxView[] = [
     lastSyncError: "Google rejected the saved connection.",
   },
   { ...base, id: "i3", email: LONG_EMAIL, isPrimary: false },
+  {
+    ...base,
+    id: "i5",
+    email: "teammate.reconnect@example.com",
+    ownerName: "Sample Teammate",
+    isMine: false,
+    status: "needs_reconnect",
+    isPrimary: false,
+  },
   {
     ...base,
     id: "i4",

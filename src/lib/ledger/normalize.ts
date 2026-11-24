@@ -75,6 +75,10 @@ export function domainMatches(domain: string, blocked: string): boolean {
 
 export function normalizeCompanyName(name: string): string {
   let text = name.toLowerCase().replace(/&/g, " and ");
+  // Initialisms such as "L.L.P." become one token before dots are treated as word separators.
+  text = text.replace(/(?<![\p{L}\p{N}])\p{L}(?:\.\p{L})+\.?(?![\p{L}\p{N}])/gu, (m) => m.replace(/\./g, ""));
+  // Hyphens, slashes, dots, commas and underscores separate words ("Smith-Jones" equals "Smith Jones").
+  text = text.replace(/[-/._,]/g, " ");
   text = text.replace(/[^\p{L}\p{N}\s]/gu, "");
   const words = text.split(/\s+/).filter(Boolean);
   while (words.length > 1 && COMPANY_SUFFIXES.has(words[words.length - 1]!)) {

@@ -12,6 +12,8 @@ import { listDnc } from "@/lib/dnc/queries";
 import { listInboxes } from "@/lib/inboxes/queries";
 import { listTeam } from "@/lib/team/list";
 
+export const maxDuration = 300;
+
 export const metadata: Metadata = { title: "Settings" };
 
 type Props = {

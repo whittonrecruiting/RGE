@@ -120,6 +120,7 @@ describe("parseImport", () => {
       ["follow_up_sent", "import:fu:f1"],
       ["follow_up_sent", "import:fu:lee@example.org:2026-11-25T16:05:00.000Z"],
     ]);
+    expect(parsed.inputs.map((i) => i.gmailMessageId)).toEqual(["f1", null]);
   });
 
   test("suppression txt pulls every email on each line", () => {

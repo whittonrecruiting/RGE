@@ -10,13 +10,16 @@ type Props = {
   email: string;
   status: "connected" | "needs_reconnect" | "disconnected";
   isPrimary: boolean;
+  isMine: boolean;
   oauthStart: string;
 };
+
+const FAILED = "That did not work. Try again.";
 
 type Message = { tone: "ok" | "error"; text: string };
 
 /** Per-inbox buttons. Failures show inline; a successful action revalidates the page on the server. */
-export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: Props) {
+export function InboxActions({ inboxId, email, status, isPrimary, isMine, oauthStart }: Props) {
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
 
@@ -26,9 +29,14 @@ export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: 
     setMessage(null);
     setRunning(which);
     start(async () => {
-      const result = await task();
-      if (!result.ok) setMessage({ tone: "error", text: result.error ?? "That did not work. Try again." });
-      setRunning(null);
+      try {
+        const result = await task();
+        if (!result.ok) setMessage({ tone: "error", text: result.error ?? FAILED });
+      } catch {
+        setMessage({ tone: "error", text: FAILED });
+      } finally {
+        setRunning(null);
+      }
     });
   }
 
@@ -36,8 +44,13 @@ export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: 
     setMessage(null);
     setRunning("sync");
     start(async () => {
-      setMessage(syncMessage(await syncInboxNow(inboxId)));
-      setRunning(null);
+      try {
+        setMessage(syncMessage(await syncInboxNow(inboxId)));
+      } catch {
+        setMessage({ tone: "error", text: FAILED });
+      } finally {
+        setRunning(null);
+      }
     });
   }
 
@@ -70,11 +83,12 @@ export function InboxActions({ inboxId, email, status, isPrimary, oauthStart }: 
             Make primary
           </button>
         )}
-        {status === "needs_reconnect" && (
+        {status === "needs_reconnect" && isMine && (
           <a href={oauthStart} className={`${primaryButton} inline-flex items-center`}>
             Reconnect
           </a>
         )}
+        {status === "needs_reconnect" && !isMine && <span className="text-sm text-text-soft">Ask the owner to reconnect.</span>}
         {status !== "disconnected" && (
           <button type="button" onClick={onDisconnect} disabled={pending} className={dangerButton}>
             Disconnect

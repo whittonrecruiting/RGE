@@ -107,6 +107,7 @@ function InboxCard({ inbox, timeZone }: { inbox: InboxView; timeZone: string }) 
             email={inbox.email}
             status={inbox.status}
             isPrimary={inbox.isPrimary}
+            isMine={inbox.isMine}
             oauthStart={OAUTH_START}
           />
         </div>

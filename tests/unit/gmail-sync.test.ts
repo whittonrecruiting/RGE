@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { agencies, inboxCredentials, inboxes, ledgerEvents, suppressions } from "@/db/schema";
+import { agencies, inboxCredentials, inboxes, ledgerEvents, memberships, suppressions } from "@/db/schema";
 import { GoogleApiError, GoogleAuthError, setTestGoogleApi, type GmailMeta, type GoogleApi } from "@/lib/google/client";
 import { encryptToken } from "@/lib/google/crypto";
 import { syncInbox } from "@/lib/gmail-sync/sync-inbox";
@@ -371,6 +371,27 @@ describe("runSyncTick", () => {
     await seedInbox(other!.id, other!.recruiterId, { email: "kim@example.net" });
     const out = await runSyncTick(FAR());
     expect(out).toEqual({ inboxes: 1, inserted: 280 });
+  });
+
+  test("skips an inbox whose owner membership was removed", async () => {
+    await seedInbox(f.agency.id, f.recA.userId);
+    await seedInbox(f.agency.id, f.recB.userId, { email: "lee@example.com" });
+    await asOwner(db, (tx) => tx.update(memberships).set({ status: "removed" }).where(eq(memberships.userId, f.recB.userId)));
+    const out = await runSyncTick(FAR());
+    expect(out.inboxes).toBe(1);
+  });
+
+  test("a failing inbox does not sort ahead of a healthy one", async () => {
+    const failFrom = new Date("2025-01-01T00:00:00Z");
+    const okFrom = new Date("2025-02-01T00:00:00Z");
+    await seedInbox(f.agency.id, f.recA.userId, { backfillFrom: failFrom, lastSyncError: "Google sync failed." });
+    await seedInbox(f.agency.id, f.recB.userId, {
+      email: "lee@example.com",
+      backfillFrom: okFrom,
+      lastSyncedAt: new Date("2026-06-01T00:00:00Z"),
+    });
+    await runSyncTick(FAR());
+    expect(fake.calls.lists[0]).toContain(String(Math.floor(okFrom.getTime() / 1000)));
   });
 
   test("starts no inbox after the deadline", async () => {

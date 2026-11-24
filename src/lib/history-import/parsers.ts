@@ -137,6 +137,7 @@ function parseSendLike(kind: "sends" | "followups", text: string, timeZone: stri
       occurredAt: at,
       source: "import",
       dedupeKey: `${prefix}${id || `${email}:${at.toISOString()}`}`,
+      gmailMessageId: id || null,
     });
   }
   return out;
