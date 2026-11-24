@@ -43,6 +43,30 @@ GRANT rge_app, rge_system TO rge_runtime WITH INHERIT FALSE, SET TRUE;
 
 Migration `0009_session_role_grants` grants the same membership to the role that runs migrations, so a development setup that uses the owner for both still works.
 
+## Gmail connection (Google OAuth app)
+
+Recruiters connect their Gmail inboxes in Settings > Inboxes. WR uses an **internal** Google Workspace OAuth app (no Google verification, no weekly token expiry). Until the app exists, Connect Gmail shows "Gmail connection is not set up yet."
+
+One-time setup, signed in to Google Cloud Console as a Workspace admin:
+
+1. Create a project named "RGE".
+2. Enable the Gmail API.
+3. OAuth consent screen: User type **Internal**, app name "RGE", scopes `https://www.googleapis.com/auth/gmail.readonly` and `https://www.googleapis.com/auth/gmail.send`.
+4. Credentials > Create OAuth client ID > Web application, with these authorized redirect URIs:
+   - `https://app.whittonrecruiting.com/api/google/oauth/callback`
+   - `http://localhost:3000/api/google/oauth/callback`
+5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on Vercel (production and preview) and in `.env.local`.
+
+Other variables:
+- `RGE_TOKEN_KEY`: base64 of 32 random bytes. Encrypts Gmail refresh tokens at rest and signs the OAuth state. Generate with `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Changing it disconnects every inbox (tokens can no longer be decrypted).
+- `CRON_SECRET`: any long random string. Vercel sends it to the sync cron as a bearer token.
+
+## Background sync
+
+`/api/cron/gmail-sync` runs every 5 minutes (`vercel.json`). Each run walks every enabled agency and syncs each connected inbox, least recently synced first, until about 270 seconds have passed. A new inbox first imports about a year of sent and received mail (`max(365, repeat window)` days), then follows Gmail's history feed. Progress is saved after every page, so an interrupted run resumes where it stopped and nothing is recorded twice. Settings > Inboxes > Sync now runs the same work for one inbox for about 50 seconds.
+
+RGE stores who was emailed and when (addresses, names, dates, Gmail message and thread ids). It never stores subjects or bodies. Gmail failure notices become permanent bounces; opt-outs come from replies (Plan 5) and from the history import in Settings.
+
 ## Repository layout
 
 ```
