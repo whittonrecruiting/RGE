@@ -108,6 +108,7 @@ describe("agency isolation (row-level security)", () => {
     const scoped = [
       "agencies", "memberships", "mpcs", "mpc_credentials", "mpc_facts",
       "mpc_restrictions", "mpc_consents", "mpc_documents", "mpc_saved_bullets", "agency_settings", "ai_usage",
+      "companies", "company_domains", "contacts", "ledger_events", "suppressions", "do_not_contact", "inboxes", "inbox_credentials",
     ];
     expect(Object.keys(byName).sort()).toEqual([...scoped, "users"].sort());
     for (const t of [...scoped, "users"]) expect(byName[t], t).toMatchObject({ enabled: true, forced: true });
@@ -119,7 +120,7 @@ describe("agency isolation (row-level security)", () => {
     const rlsMigrations = readdirSync(dir)
       .filter((f) => /^\d{4}_rls.*\.sql$/.test(f))
       .sort();
-    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql", "0004_rls_system.sql", "0006_rls_membership_removal.sql", "0008_rls_plan1_hardening.sql", "0013_rls_sample_pitch.sql"]);
+    expect(rlsMigrations).toEqual(["0001_rls.sql", "0003_rls_users_memberships.sql", "0004_rls_system.sql", "0006_rls_membership_removal.sql", "0008_rls_plan1_hardening.sql", "0013_rls_sample_pitch.sql", "0015_rls_ledger_inboxes.sql"]);
     const combined = rlsMigrations.map((f) => normalize(readFileSync(join(dir, f), "utf8"))).join("\n\n");
     expect(combined).toBe(normalize(readFileSync(join(process.cwd(), "src/db/rls.sql"), "utf8")));
   });

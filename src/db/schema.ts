@@ -56,6 +56,32 @@ export const restrictionKind = pgEnum("restriction_kind", [
 export const consentMethod = pgEnum("consent_method", ["verbal", "email", "signed_form"]);
 export const documentKind = pgEnum("document_kind", ["resume", "notes", "transcript"]);
 export const aiPurpose = pgEnum("ai_purpose", ["extraction", "find_more", "sample_pitch"]);
+export const ledgerEventType = pgEnum("ledger_event_type", [
+  "proposed",
+  "drafted",
+  "approved",
+  "denied",
+  "sent",
+  "follow_up_sent",
+  "received",
+  "replied_interested",
+  "replied_declined",
+  "opted_out",
+  "bounced",
+  "out_of_office",
+  "lead_stage_change",
+  "agreement_signed",
+]);
+export const ledgerSource = pgEnum("ledger_source", ["rge", "gmail", "import", "manual"]);
+export const suppressionReason = pgEnum("suppression_reason", ["opted_out", "bounced", "manual"]);
+export const inboxStatus = pgEnum("inbox_status", ["connected", "needs_reconnect", "disconnected"]);
+export const dncSource = pgEnum("dnc_source", ["manual", "csv"]);
+
+export type LedgerEventType = (typeof ledgerEventType.enumValues)[number];
+export type LedgerSource = (typeof ledgerSource.enumValues)[number];
+export type SuppressionReason = (typeof suppressionReason.enumValues)[number];
+export type InboxStatus = (typeof inboxStatus.enumValues)[number];
+export type DncSource = (typeof dncSource.enumValues)[number];
 
 // The updated_at of the last Clerk event applied to a row. Older (out of order) events are skipped.
 const clerkUpdatedAt = () => timestamp("clerk_updated_at", { withTimezone: true });
@@ -288,4 +314,199 @@ export const aiUsage = pgTable(
     index("ai_usage_agency_created_idx").on(t.agencyId, t.createdAt),
     index("ai_usage_agency_user_created_idx").on(t.agencyId, t.userId, t.createdAt),
   ],
+);
+
+// Prospect companies the agency has seen. A company blocked or contacted is found by its domains.
+export const companies = pgTable(
+  "companies",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    name: text("name").notNull(),
+    isClient: boolean("is_client").notNull().default(false),
+    ...timestamps,
+  },
+  (t) => [unique("companies_agency_id_unique").on(t.agencyId, t.id)],
+);
+
+export const companyDomains = pgTable(
+  "company_domains",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    companyId: uuid("company_id").notNull(),
+    domain: text("domain").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    foreignKey({
+      name: "company_domains_company_fk",
+      columns: [t.agencyId, t.companyId],
+      foreignColumns: [companies.agencyId, companies.id],
+    }).onDelete("cascade"),
+    unique("company_domains_agency_domain_unique").on(t.agencyId, t.domain),
+  ],
+);
+
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    // Normalized (lower case, trimmed).
+    email: text("email").notNull(),
+    companyId: uuid("company_id"),
+    name: text("name"),
+    title: text("title"),
+    ...timestamps,
+  },
+  (t) => [
+    unique("contacts_agency_email_unique").on(t.agencyId, t.email),
+    unique("contacts_agency_id_unique").on(t.agencyId, t.id),
+    // The migration narrows this to ON DELETE SET NULL (company_id): agency_id stays.
+    foreignKey({
+      name: "contacts_company_fk",
+      columns: [t.agencyId, t.companyId],
+      foreignColumns: [companies.agencyId, companies.id],
+    }).onDelete("set null"),
+  ],
+);
+
+export const inboxes = pgTable(
+  "inboxes",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    userId: uuid("user_id").notNull(),
+    email: text("email").notNull(),
+    provider: text("provider").notNull().default("gmail"),
+    status: inboxStatus("status").notNull().default("connected"),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    signatureHtml: text("signature_html"),
+    domainCheck: jsonb("domain_check"),
+    domainCheckedAt: timestamp("domain_checked_at", { withTimezone: true }),
+    backfillFrom: timestamp("backfill_from", { withTimezone: true }).notNull(),
+    backfillCursor: jsonb("backfill_cursor"),
+    backfillDoneAt: timestamp("backfill_done_at", { withTimezone: true }),
+    historyId: text("history_id"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    lastSyncError: text("last_sync_error"),
+    ...timestamps,
+  },
+  (t) => [
+    sameAgencyMember(t, t.userId, "inboxes_user_member_fk"),
+    unique("inboxes_agency_email_unique").on(t.agencyId, t.email),
+    unique("inboxes_agency_id_unique").on(t.agencyId, t.id),
+  ],
+);
+
+// The encrypted Gmail refresh token for an inbox. Never selected into UI data or logged.
+export const inboxCredentials = pgTable(
+  "inbox_credentials",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    inboxId: uuid("inbox_id").notNull(),
+    refreshTokenEnc: text("refresh_token_enc").notNull(),
+    scopes: text("scopes").array().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "inbox_credentials_inbox_fk",
+      columns: [t.agencyId, t.inboxId],
+      foreignColumns: [inboxes.agencyId, inboxes.id],
+    }).onDelete("cascade"),
+    unique("inbox_credentials_inbox_unique").on(t.inboxId),
+  ],
+);
+
+// Append-only record of every outreach event, kept for repeat checks and KPIs. It stores
+// addresses, names, dates and Gmail ids only, never subjects or bodies.
+export const ledgerEvents = pgTable(
+  "ledger_events",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    type: ledgerEventType("type").notNull(),
+    email: text("email"),
+    domain: text("domain"),
+    contactId: uuid("contact_id"),
+    companyId: uuid("company_id"),
+    mpcId: uuid("mpc_id"),
+    userId: uuid("user_id"),
+    inboxId: uuid("inbox_id"),
+    gmailMessageId: text("gmail_message_id"),
+    gmailThreadId: text("gmail_thread_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    source: ledgerSource("source").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "ledger_events_contact_fk",
+      columns: [t.agencyId, t.contactId],
+      foreignColumns: [contacts.agencyId, contacts.id],
+    }),
+    foreignKey({
+      name: "ledger_events_company_fk",
+      columns: [t.agencyId, t.companyId],
+      foreignColumns: [companies.agencyId, companies.id],
+    }),
+    // The migration narrows this to ON DELETE SET NULL (mpc_id): agency_id stays.
+    foreignKey({
+      name: "ledger_events_mpc_fk",
+      columns: [t.agencyId, t.mpcId],
+      foreignColumns: [mpcs.agencyId, mpcs.id],
+    }).onDelete("set null"),
+    sameAgencyMember(t, t.userId, "ledger_events_user_member_fk"),
+    foreignKey({
+      name: "ledger_events_inbox_fk",
+      columns: [t.agencyId, t.inboxId],
+      foreignColumns: [inboxes.agencyId, inboxes.id],
+    }),
+    unique("ledger_events_agency_dedupe_unique").on(t.agencyId, t.dedupeKey),
+    index("ledger_events_agency_email_idx").on(t.agencyId, t.email, t.occurredAt),
+    index("ledger_events_agency_company_idx").on(t.agencyId, t.companyId, t.occurredAt),
+    index("ledger_events_agency_type_idx").on(t.agencyId, t.type, t.occurredAt),
+  ],
+);
+
+// Opt-outs and bounces. Permanent: the app role can insert and never update or delete.
+export const suppressions = pgTable(
+  "suppressions",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    email: text("email").notNull(),
+    reason: suppressionReason("reason").notNull(),
+    source: ledgerSource("source").notNull(),
+    note: text("note"),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    sameAgencyMember(t, t.createdBy, "suppressions_created_by_member_fk"),
+    unique("suppressions_agency_email_unique").on(t.agencyId, t.email),
+  ],
+);
+
+// Companies the agency never contacts. Matched by domain and by parent or subsidiary aliases.
+export const doNotContact = pgTable(
+  "do_not_contact",
+  {
+    id: id(),
+    agencyId: agencyId(),
+    name: text("name").notNull(),
+    domains: text("domains").array().notNull().default(sql`'{}'::text[]`),
+    aliases: text("aliases").array().notNull().default(sql`'{}'::text[]`),
+    source: dncSource("source").notNull(),
+    note: text("note"),
+    createdBy: uuid("created_by"),
+    ...timestamps,
+  },
+  (t) => [sameAgencyMember(t, t.createdBy, "do_not_contact_created_by_member_fk")],
 );

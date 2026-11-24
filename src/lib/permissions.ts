@@ -1,6 +1,17 @@
 import type { Member, Role } from "./auth";
 
-export type Action = "mpc.view" | "mpc.edit" | "team.manage" | "team.setRole" | "team.remove" | "settings.edit";
+export type Action =
+  | "mpc.view"
+  | "mpc.edit"
+  | "team.manage"
+  | "team.setRole"
+  | "team.remove"
+  | "settings.edit"
+  | "inbox.connect"
+  | "inbox.manage"
+  | "dnc.edit"
+  | "suppression.add"
+  | "history.import";
 
 export type PermissionTarget = { ownerUserId?: string; targetRole?: Role };
 
@@ -17,8 +28,17 @@ export function can(member: Member, action: Action, target: PermissionTarget = {
     case "mpc.edit":
       if (isManager(member.role)) return true;
       return target.ownerUserId !== undefined && target.ownerUserId === member.userId;
+    case "inbox.manage":
+      // The inbox owner or a manager. An unknown owner denies (fail closed).
+      if (isManager(member.role)) return true;
+      return target.ownerUserId !== undefined && target.ownerUserId === member.userId;
+    case "inbox.connect":
+    case "suppression.add":
+      return true;
     case "team.manage":
     case "settings.edit":
+    case "dnc.edit":
+    case "history.import":
       return isManager(member.role);
     case "team.setRole":
     case "team.remove":
