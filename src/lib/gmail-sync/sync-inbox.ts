@@ -5,9 +5,9 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { inboxCredentials, inboxes } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
-import { GoogleAuthError, googleApi, type GmailMeta, type GoogleApi } from "@/lib/google/client";
+import { GoogleApiError, GoogleAuthError, googleApi, type GmailMeta, type GoogleApi } from "@/lib/google/client";
 import { decryptToken } from "@/lib/google/crypto";
-import { ownDomains, recordEvents, type LedgerInput } from "@/lib/ledger/record";
+import { ownAddresses, ownDomains, recordEvents, type LedgerInput } from "@/lib/ledger/record";
 import { messageToInputs } from "./parse";
 
 export type SyncOutcome = { status: "done" | "more" | "needs_reconnect" | "error"; inserted: number; error?: string };
@@ -19,12 +19,17 @@ const METADATA_CONCURRENCY = 5;
 const ERROR_MAX = 300;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Gmail search date (YYYY/MM/DD, UTC). */
-const gmailDate = (d: Date) =>
-  `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
+/** Gmail search bound in epoch seconds: exact, with no time-zone interpretation of a date. */
+const gmailAfter = (d: Date) => `after:${Math.floor(d.getTime() / 1000)}`;
+
+/** Fixed text stored for any failure that does not come from the Google client (it could carry query data). */
+const GENERIC_ERROR = "Sync failed.";
+
+/** Only the Google client's own errors carry a message safe to store; everything else is generic. */
+const safeMessage = (e: unknown) => (e instanceof GoogleApiError && e.message ? e.message : GENERIC_ERROR).slice(0, ERROR_MAX);
 
 const backfillQuery = (phase: BackfillCursor["phase"], from: Date) =>
-  phase === "sent" ? `in:sent after:${gmailDate(from)}` : `-in:sent -in:chats -in:drafts after:${gmailDate(from)}`;
+  phase === "sent" ? `in:sent ${gmailAfter(from)}` : `-in:sent -in:chats -in:drafts ${gmailAfter(from)}`;
 
 function asCursor(v: unknown): BackfillCursor {
   if (v && typeof v === "object") {
@@ -49,7 +54,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
-const isNotFound = (e: unknown) => e instanceof Error && /HTTP 404\b/.test(e.message);
+const isStatus = (e: unknown, status: number) => e instanceof GoogleApiError && e.status === status;
 
 type InboxState = {
   id: string;
@@ -63,6 +68,7 @@ type InboxState = {
   lastSyncedAt: Date | null;
   refreshTokenEnc: string | null;
   ownDomains: string[];
+  ownAddresses: string[];
 };
 
 async function loadInbox(agencyId: string, inboxId: string): Promise<InboxState | undefined> {
@@ -84,7 +90,7 @@ async function loadInbox(agencyId: string, inboxId: string): Promise<InboxState 
       .leftJoin(inboxCredentials, eq(inboxCredentials.inboxId, inboxes.id))
       .where(eq(inboxes.id, inboxId));
     if (!row) return undefined;
-    return { ...row, ownDomains: await ownDomains(tx) };
+    return { ...row, ownDomains: await ownDomains(tx), ownAddresses: await ownAddresses(tx) };
   });
 }
 
@@ -97,7 +103,9 @@ export async function syncInbox(agencyId: string, inboxId: string, deadline: num
   try {
     inbox = await loadInbox(agencyId, inboxId);
   } catch {
-    return { status: "error", inserted: 0, error: "Inbox not found." };
+    // A database failure, not a missing inbox. Its text could carry query data, so it is not passed on.
+    console.warn("Gmail sync could not load an inbox");
+    return { status: "error", inserted: 0, error: GENERIC_ERROR };
   }
   if (!inbox) return { status: "error", inserted: 0, error: "Inbox not found." };
   if (inbox.status === "needs_reconnect") return { status: "needs_reconnect", inserted: 0 };
@@ -113,11 +121,11 @@ export async function syncInbox(agencyId: string, inboxId: string, deadline: num
       try {
         return await api.messageMetadata(accessToken, id);
       } catch (e) {
-        if (isNotFound(e)) return null;
+        if (isStatus(e, 404)) return null;
         throw e;
       }
     });
-    const ctx = { inboxId: state.id, inboxEmail: state.email, userId: state.userId, ownDomains: state.ownDomains };
+    const ctx = { inboxId: state.id, inboxEmail: state.email, userId: state.userId, ownDomains: state.ownDomains, ownAddresses: state.ownAddresses };
     return metas.flatMap((m) => (m ? messageToInputs(m, ctx) : []));
   };
 
@@ -140,7 +148,7 @@ export async function syncInbox(agencyId: string, inboxId: string, deadline: num
   const relist = async (accessToken: string): Promise<SyncOutcome> => {
     const { historyId } = await api.profile(accessToken);
     const since = new Date((state.lastSyncedAt ?? state.backfillFrom).getTime() - DAY_MS);
-    const q = `-in:chats -in:drafts after:${gmailDate(since)}`;
+    const q = `-in:chats -in:drafts ${gmailAfter(since)}`;
     let token: string | undefined;
     for (;;) {
       if (expired()) return { status: "more", inserted };
@@ -170,7 +178,20 @@ export async function syncInbox(agencyId: string, inboxId: string, deadline: num
           state.historyId ??= historyId;
           capturedHistory = true;
         }
-        const listed = await api.listMessageIds(accessToken, backfillQuery(cursor.phase, state.backfillFrom), cursor.pageToken);
+        let listed: Awaited<ReturnType<GoogleApi["listMessageIds"]>>;
+        try {
+          listed = await api.listMessageIds(accessToken, backfillQuery(cursor.phase, state.backfillFrom), cursor.pageToken);
+        } catch (e) {
+          // Gmail rejected a saved page token (stale or invalid): restart this phase instead of
+          // failing on it forever. Dedupe keys make the replayed pages harmless.
+          if (!(isStatus(e, 400) && cursor.pageToken)) throw e;
+          const restart: BackfillCursor = { phase: cursor.phase };
+          cursor = restart;
+          await withAgency(agencyId, (tx) =>
+            tx.update(inboxes).set({ backfillCursor: restart, lastSyncError: safeMessage(e), updatedAt: new Date() }).where(eq(inboxes.id, state.id)),
+          );
+          continue;
+        }
         const inputs = await inputsFor(accessToken, listed.ids);
         const done = !listed.nextPageToken && cursor.phase === "received";
         const nextCursor: BackfillCursor | null = listed.nextPageToken
@@ -212,7 +233,8 @@ export async function syncInbox(agencyId: string, inboxId: string, deadline: num
       );
       return { status: "needs_reconnect", inserted };
     }
-    const message = (e instanceof Error && e.message ? e.message : "Sync failed.").slice(0, ERROR_MAX);
+    const message = safeMessage(e);
+    if (!(e instanceof GoogleApiError)) console.warn("Gmail sync failed with a non-Google error");
     try {
       await withAgency(agencyId, (tx) => tx.update(inboxes).set({ lastSyncError: message }).where(eq(inboxes.id, state.id)));
     } catch {

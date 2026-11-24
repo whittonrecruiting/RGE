@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { agencies, inboxCredentials, inboxes, ledgerEvents, suppressions } from "@/db/schema";
-import { GoogleAuthError, setTestGoogleApi, type GmailMeta, type GoogleApi } from "@/lib/google/client";
+import { GoogleApiError, GoogleAuthError, setTestGoogleApi, type GmailMeta, type GoogleApi } from "@/lib/google/client";
 import { encryptToken } from "@/lib/google/crypto";
 import { syncInbox } from "@/lib/gmail-sync/sync-inbox";
 import { runSyncTick } from "@/lib/gmail-sync/tick";
@@ -96,7 +96,7 @@ function makeFake(): Fake {
     messageMetadata: async (_token, id) => {
       fake.calls.meta++;
       const m = fake.messages.get(id);
-      if (!m) throw new Error("Google message get failed: HTTP 404 (NOT_FOUND)");
+      if (!m) throw new GoogleApiError("Google message get failed: HTTP 404 (NOT_FOUND)", 404);
       return m;
     },
     history: async (_token, start) => {
@@ -157,10 +157,10 @@ describe("syncInbox", () => {
     const out = await syncInbox(f.agency.id, id, FAR(), fake);
     expect(out).toEqual({ status: "done", inserted: 280 });
     expect(fake.calls.lists).toEqual([
-      "in:sent after:2025/11/24|",
-      "in:sent after:2025/11/24|100",
-      "in:sent after:2025/11/24|200",
-      "-in:sent -in:chats -in:drafts after:2025/11/24|",
+      "in:sent after:1763942400|",
+      "in:sent after:1763942400|100",
+      "in:sent after:1763942400|200",
+      "-in:sent -in:chats -in:drafts after:1763942400|",
     ]);
     const rows = await events();
     expect(rows.filter((e) => e.type === "sent")).toHaveLength(250);
@@ -191,7 +191,7 @@ describe("syncInbox", () => {
     fake.onList = undefined;
     const second = await syncInbox(f.agency.id, id, FAR(), fake);
     expect(second).toEqual({ status: "done", inserted: 180 });
-    expect(fake.calls.lists[1]).toBe("in:sent after:2025/11/24|100");
+    expect(fake.calls.lists[1]).toBe("in:sent after:1763942400|100");
     const rows = await events();
     expect(rows).toHaveLength(280);
     expect(new Set(rows.map((e) => e.dedupeKey)).size).toBe(280);
@@ -256,7 +256,7 @@ describe("syncInbox", () => {
     const out = await syncInbox(f.agency.id, id, FAR(), fake);
     expect(out).toEqual({ status: "done", inserted: 2 });
     expect(fake.calls.history).toEqual(["500"]);
-    expect(fake.calls.lists).toEqual(["-in:chats -in:drafts after:2026/11/19|"]);
+    expect(fake.calls.lists).toEqual(["-in:chats -in:drafts after:1795082400|"]);
     const inbox = await inboxRow(id);
     expect(inbox.historyId).toBe("3000");
     expect(inbox.lastSyncedAt!.getTime()).toBeGreaterThan(lastSynced.getTime());
@@ -277,13 +277,80 @@ describe("syncInbox", () => {
   test("other errors store a short message and return error", async () => {
     const id = await seedInbox(f.agency.id, f.recA.userId);
     fake.listMessageIds = async () => {
-      throw new Error("Google messages list failed: HTTP 403 (PERMISSION_DENIED)");
+      throw new GoogleApiError("Google messages list failed: HTTP 403 (PERMISSION_DENIED)", 403);
     };
     const out = await syncInbox(f.agency.id, id, FAR(), fake);
     expect(out).toEqual({ status: "error", inserted: 0, error: "Google messages list failed: HTTP 403 (PERMISSION_DENIED)" });
     const inbox = await inboxRow(id);
     expect(inbox.lastSyncError).toBe("Google messages list failed: HTTP 403 (PERMISSION_DENIED)");
     expect(inbox.status).toBe("connected");
+  });
+
+  test("a non-Google error stores a fixed message, never its text", async () => {
+    const id = await seedInbox(f.agency.id, f.recA.userId);
+    fake.messageMetadata = async () => {
+      throw new Error('Failed query: insert into "contacts" params: alex.lee@example.org,Alex Lee');
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const out = await syncInbox(f.agency.id, id, FAR(), fake);
+    expect(out).toEqual({ status: "error", inserted: 0, error: "Sync failed." });
+    expect((await inboxRow(id)).lastSyncError).toBe("Sync failed.");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("example.org");
+  });
+
+  test("a database failure loading the inbox is not reported as not found", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // A malformed id fails inside the query (uuid cast).
+    expect(await syncInbox(f.agency.id, "not-a-uuid", FAR(), fake)).toEqual({ status: "error", inserted: 0, error: "Sync failed." });
+  });
+
+  test("a saved page token Gmail rejects restarts the phase instead of blocking", async () => {
+    const id = await seedInbox(f.agency.id, f.recA.userId, { backfillCursor: { phase: "sent", pageToken: "stale" }, historyId: "1000" });
+    const list = fake.listMessageIds;
+    fake.listMessageIds = async (token, q, pageToken) => {
+      if (pageToken === "stale") {
+        fake.calls.lists.push(`${q}|stale`);
+        throw new GoogleApiError("Google messages list failed: HTTP 400 (invalidArgument)", 400);
+      }
+      return list(token, q, pageToken);
+    };
+    const out = await syncInbox(f.agency.id, id, FAR(), fake);
+    expect(out).toEqual({ status: "done", inserted: 280 });
+    expect(fake.calls.lists.slice(0, 2)).toEqual(["in:sent after:1763942400|stale", "in:sent after:1763942400|"]);
+    expect(fake.calls.lists.filter((l) => l.endsWith("|stale"))).toHaveLength(1);
+    expect((await inboxRow(id)).lastSyncError).toBeNull();
+  });
+
+  test("a 400 without a saved page token is an ordinary error", async () => {
+    const id = await seedInbox(f.agency.id, f.recA.userId, { backfillCursor: { phase: "sent", pageToken: "stale" }, historyId: "1000" });
+    fake.listMessageIds = async (_t, q, pageToken) => {
+      fake.calls.lists.push(`${q}|${pageToken ?? ""}`);
+      throw new GoogleApiError("Google messages list failed: HTTP 400 (invalidArgument)", 400);
+    };
+    const out = await syncInbox(f.agency.id, id, FAR(), fake);
+    expect(out.status).toBe("error");
+    expect(fake.calls.lists).toHaveLength(2);
+    const inbox = await inboxRow(id);
+    expect(inbox.backfillCursor).toEqual({ phase: "sent" });
+    expect(inbox.lastSyncError).toBe("Google messages list failed: HTTP 400 (invalidArgument)");
+  });
+
+  test("a gmail.com inbox records other gmail.com addresses but not the agency's own inboxes", async () => {
+    // Made-up local parts; gmail.com is needed because it is on the free-mail list.
+    const id = await seedInbox(f.agency.id, f.recA.userId, { email: "recruiter.example@gmail.com" });
+    await seedInbox(f.agency.id, f.recB.userId, { email: "colleague.example@gmail.com" }, false);
+    const g = (id: string, headers: Record<string, string>, labelIds: string[]): GmailMeta => ({ id, threadId: `t-${id}`, internalDate: at(1), labelIds, headers });
+    fake.messages.set("g1", g("g1", { to: "candidate.example@gmail.com, colleague.example@gmail.com" }, ["SENT"]));
+    fake.messages.set("g2", g("g2", { from: "Casey Example <candidate.two@gmail.com>" }, ["INBOX"]));
+    fake.messages.set("g3", g("g3", { from: "colleague.example@gmail.com" }, ["INBOX"]));
+    fake.sent = ["g1"];
+    fake.received = ["g2", "g3"];
+    const out = await syncInbox(f.agency.id, id, FAR(), fake);
+    expect(out).toEqual({ status: "done", inserted: 2 });
+    expect((await events()).map((e) => [e.type, e.email]).sort()).toEqual([
+      ["received", "candidate.two@gmail.com"],
+      ["sent", "candidate.example@gmail.com"],
+    ]);
   });
 
   test("inboxes that are not connected are not synced", async () => {

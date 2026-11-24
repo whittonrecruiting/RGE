@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
 import { companies, companyDomains, contacts, inboxes, ledgerEvents, suppressions } from "@/db/schema";
 import { withAgency } from "@/db/with-agency";
-import { addSuppression, ownDomains, recordEvents, type LedgerInput } from "@/lib/ledger/record";
+import { addSuppression, ownAddresses, ownDomains, recordEvents, type LedgerInput } from "@/lib/ledger/record";
 import { createTestDb, seedAgencies } from "../helpers/test-db";
 
 let close: (() => Promise<void>) | undefined;
@@ -163,8 +163,16 @@ describe("ownDomains", () => {
         { ...base, email: "One@Own-Example.org", status: "connected" as const },
         { ...base, email: "two@own-example.org", status: "disconnected" as const },
         { ...base, email: "three@other-example.net", status: "connected" as const },
+        { ...base, email: "Recruiter.Example@Gmail.com", status: "connected" as const },
       ]);
+      // A free-mail inbox never makes its whole domain "own".
       expect((await ownDomains(tx)).sort()).toEqual(["other-example.net", "own-example.org"]);
+      expect((await ownAddresses(tx)).sort()).toEqual([
+        "one@own-example.org",
+        "recruiter.example@gmail.com",
+        "three@other-example.net",
+        "two@own-example.org",
+      ]);
     });
   });
 });

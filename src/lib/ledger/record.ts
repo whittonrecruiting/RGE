@@ -29,15 +29,24 @@ export type LedgerInput = {
   note?: string | null;
 };
 
-/** Distinct, normalized email domains of the agency's inboxes (any status). */
+/**
+ * Distinct, normalized email domains of the agency's inboxes (any status). Free-mail domains are
+ * left out: an inbox at gmail.com must not make every gmail.com candidate look internal.
+ */
 export async function ownDomains(tx: Tx): Promise<string[]> {
   const rows = await tx.select({ email: inboxes.email }).from(inboxes);
   const domains = new Set<string>();
   for (const r of rows) {
     const email = normalizeEmail(r.email);
-    if (email) domains.add(domainOf(email));
+    if (email && !isFreemail(domainOf(email))) domains.add(domainOf(email));
   }
   return [...domains];
+}
+
+/** Normalized addresses of the agency's inboxes (any status). */
+export async function ownAddresses(tx: Tx): Promise<string[]> {
+  const rows = await tx.select({ email: inboxes.email }).from(inboxes);
+  return [...new Set(rows.map((r) => normalizeEmail(r.email)).filter((e): e is string => e !== null))];
 }
 
 /**

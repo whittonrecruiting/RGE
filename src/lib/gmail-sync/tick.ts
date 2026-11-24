@@ -14,24 +14,29 @@ export async function runSyncTick(deadline: number, api: GoogleApi = googleApi()
   let inserted = 0;
   for (const agency of agencyRows) {
     if (Date.now() > deadline) break;
-    const rows = await withAgency(agency.id, (tx) =>
-      tx
-        .select({ id: inboxes.id })
-        .from(inboxes)
-        .innerJoin(inboxCredentials, eq(inboxCredentials.inboxId, inboxes.id))
-        .where(eq(inboxes.status, "connected"))
-        .orderBy(sql`${inboxes.lastSyncedAt} asc nulls first`, asc(inboxes.id)),
-    );
-    for (const row of rows) {
-      if (Date.now() > deadline) break;
-      try {
-        const out = await syncInbox(agency.id, row.id, deadline, api);
-        inserted += out.inserted;
-      } catch {
-        // One inbox failing (for example a database error) must not stop the others.
-        console.warn("Gmail sync failed for one inbox");
+    try {
+      const rows = await withAgency(agency.id, (tx) =>
+        tx
+          .select({ id: inboxes.id })
+          .from(inboxes)
+          .innerJoin(inboxCredentials, eq(inboxCredentials.inboxId, inboxes.id))
+          .where(eq(inboxes.status, "connected"))
+          .orderBy(sql`${inboxes.lastSyncedAt} asc nulls first`, asc(inboxes.id)),
+      );
+      for (const row of rows) {
+        if (Date.now() > deadline) break;
+        try {
+          const out = await syncInbox(agency.id, row.id, deadline, api);
+          inserted += out.inserted;
+        } catch {
+          // One inbox failing (for example a database error) must not stop the others.
+          console.warn("Gmail sync failed for one inbox");
+        }
+        synced++;
       }
-      synced++;
+    } catch {
+      // One agency failing (for example listing its inboxes) must not stop later agencies.
+      console.warn("Gmail sync failed for one agency");
     }
   }
   return { inboxes: synced, inserted };

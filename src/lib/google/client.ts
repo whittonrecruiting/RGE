@@ -8,6 +8,20 @@ export class GoogleAuthError extends Error {
   }
 }
 
+/**
+ * Any other failure raised by this client. The message is safe to store and show: operation,
+ * HTTP status and Google's short code only. `status` is the HTTP status, or null when there was
+ * no usable response (network error, missing fields, not configured).
+ */
+export class GoogleApiError extends Error {
+  readonly status: number | null;
+  constructor(message: string, status: number | null = null) {
+    super(message);
+    this.name = "GoogleApiError";
+    this.status = status;
+  }
+}
+
 export type GmailMeta = {
   id: string;
   threadId: string;
@@ -50,9 +64,9 @@ function errorCode(body: Json): string | undefined {
 }
 
 /** Error text carries the operation, status and Google's code only. No request or response bodies, tokens or codes. */
-function failure(op: string, r: Reply): Error {
+function failure(op: string, r: Reply): GoogleApiError {
   const code = errorCode(r.body);
-  return new Error(`Google ${op} failed: HTTP ${r.status}${code ? ` (${code})` : ""}`);
+  return new GoogleApiError(`Google ${op} failed: HTTP ${r.status}${code ? ` (${code})` : ""}`, r.status);
 }
 
 export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } = {}): GoogleApi {
@@ -65,7 +79,7 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
         res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       } catch {
         // Covers timeouts too. The underlying error can embed the URL (query text, page tokens), so it is not passed on.
-        throw new Error(`Google ${op} failed: network error`);
+        throw new GoogleApiError(`Google ${op} failed: network error`);
       }
       if (retry && (res.status === 429 || res.status >= 500) && attempt < BACKOFF_MS.length) {
         await sleep(BACKOFF_MS[attempt]);
@@ -86,7 +100,7 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
     const client_id = process.env.GOOGLE_CLIENT_ID;
     const client_secret = process.env.GOOGLE_CLIENT_SECRET;
     if (!client_id || !client_secret) {
-      throw new Error("Gmail connection is not set up (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).");
+      throw new GoogleApiError("Gmail connection is not set up (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).");
     }
     return send(
       op,
@@ -111,9 +125,9 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
       const r = await tokenPost("code exchange", { grant_type: "authorization_code", code, redirect_uri: redirectUri }, false); // the code is single-use: never retried
       if (!r.ok) throw failure("code exchange", r);
       const { access_token, refresh_token, scope } = r.body;
-      if (typeof access_token !== "string" || !access_token) throw new Error("Google code exchange returned no access token.");
+      if (typeof access_token !== "string" || !access_token) throw new GoogleApiError("Google code exchange returned no access token.");
       if (typeof refresh_token !== "string" || !refresh_token) {
-        throw new Error("Google did not return a refresh token. Reconnect and approve offline access with consent.");
+        throw new GoogleApiError("Google did not return a refresh token. Reconnect and approve offline access with consent.");
       }
       const scopes = typeof scope === "string" ? scope.split(/\s+/).filter(Boolean) : [];
       return { refreshToken: refresh_token, accessToken: access_token, scopes };
@@ -126,7 +140,7 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
         throw failure("token refresh", r);
       }
       const t = r.body.access_token;
-      if (typeof t !== "string" || !t) throw new Error("Google token refresh returned no access token.");
+      if (typeof t !== "string" || !t) throw new GoogleApiError("Google token refresh returned no access token.");
       return t;
     },
 
@@ -145,7 +159,7 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
       const r = await gmail("profile", accessToken, "profile");
       if (!r.ok) throw failure("profile", r);
       const { emailAddress, historyId } = r.body;
-      if (typeof emailAddress !== "string" || historyId === undefined || historyId === null) throw new Error("Google profile response was incomplete.");
+      if (typeof emailAddress !== "string" || historyId === undefined || historyId === null) throw new GoogleApiError("Google profile response was incomplete.");
       return { emailAddress, historyId: String(historyId) };
     },
 

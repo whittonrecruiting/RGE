@@ -3,9 +3,17 @@
 
 import type { GmailMeta } from "@/lib/google/client";
 import type { LedgerInput } from "@/lib/ledger/record";
-import { domainOf, parseAddressList } from "@/lib/ledger/normalize";
+import { domainOf, isFreemail, normalizeEmail, parseAddressList } from "@/lib/ledger/normalize";
 
-export type MessageContext = { inboxId: string; inboxEmail: string; userId: string; ownDomains: string[] };
+export type MessageContext = {
+  inboxId: string;
+  inboxEmail: string;
+  userId: string;
+  /** The agency's inbox domains. Free-mail domains in it are ignored. */
+  ownDomains: string[];
+  /** Exact addresses of the agency's other inboxes, own even on a free-mail domain. */
+  ownAddresses?: string[];
+};
 
 /** Labels whose messages are never outreach or replies. */
 const SKIP_LABELS = new Set(["DRAFT", "SPAM", "CHAT"]);
@@ -15,7 +23,16 @@ const BULK_PRECEDENCE = new Set(["bulk", "list", "junk"]);
 
 export function messageToInputs(m: GmailMeta, ctx: MessageContext): LedgerInput[] {
   if (m.labelIds.some((l) => SKIP_LABELS.has(l))) return [];
-  const own = new Set([...ctx.ownDomains, domainOf(ctx.inboxEmail)].map((d) => d.trim().toLowerCase()).filter(Boolean));
+  const inboxEmail = normalizeEmail(ctx.inboxEmail);
+  // Own means a non-free-mail agency domain, or exactly one of the agency's inbox addresses.
+  // A whole free-mail domain is never own: candidates use personal (often gmail.com) addresses.
+  const ownDomainSet = new Set(
+    [...ctx.ownDomains, inboxEmail ? domainOf(inboxEmail) : ""].map((d) => d.trim().toLowerCase()).filter((d) => d && !isFreemail(d)),
+  );
+  const ownAddressSet = new Set(
+    [...(ctx.ownAddresses ?? []), ctx.inboxEmail].map((e) => normalizeEmail(e)).filter((e): e is string => e !== null),
+  );
+  const isOwn = (email: string) => ownAddressSet.has(email) || ownDomainSet.has(domainOf(email));
   const h = m.headers;
   const base = {
     occurredAt: new Date(m.internalDate),
@@ -32,7 +49,7 @@ export function messageToInputs(m: GmailMeta, ctx: MessageContext): LedgerInput[
     const out: LedgerInput[] = [];
     for (const header of [h.to, h.cc, h.bcc]) {
       for (const r of parseAddressList(header ?? "")) {
-        if (seen.has(r.email) || own.has(domainOf(r.email))) continue;
+        if (seen.has(r.email) || isOwn(r.email)) continue;
         seen.add(r.email);
         out.push({ ...base, type: "sent", email: r.email, name: r.name, dedupeKey: key(r.email) });
       }
@@ -57,7 +74,7 @@ export function messageToInputs(m: GmailMeta, ctx: MessageContext): LedgerInput[
     return out;
   }
 
-  if (own.has(domainOf(from.email))) return [];
+  if (isOwn(from.email)) return [];
   if (h["list-unsubscribe"] !== undefined) return [];
   if (BULK_PRECEDENCE.has((h.precedence ?? "").trim().toLowerCase())) return [];
   const auto = h["auto-submitted"];
