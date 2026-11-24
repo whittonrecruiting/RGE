@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, hkdfSync, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   TokenKeyError,
@@ -82,6 +82,22 @@ describe("OAuth state", () => {
 
     expect(verifyOAuthState(state, p.issuedAt + 10 * 60_000)).not.toBeNull();
     expect(verifyOAuthState(state, p.issuedAt + 10 * 60_000 + 1)).toBeNull();
+  });
+
+  it("returns null for non-object payloads and non-canonical signatures, and tolerates a padded key", () => {
+    const state = signOAuthState(p);
+    const [payload, sig] = state.split(".");
+    expect(verifyOAuthState(`${payload}.${sig}=`, p.issuedAt)).toBeNull();
+    const key = process.env.RGE_TOKEN_KEY!;
+    const k = Buffer.from(hkdfSync("sha256", Buffer.from(key, "base64"), Buffer.alloc(0), "oauth-state", 32));
+    for (const raw of ["null", "42", "[1]"]) {
+      const pl = Buffer.from(raw).toString("base64url");
+      const good = createHmac("sha256", k).update(pl).digest("base64url");
+      expect(verifyOAuthState(`${pl}.${good}`, p.issuedAt)).toBeNull();
+    }
+    process.env.RGE_TOKEN_KEY = `  ${key}\n`;
+    expect(tokenKeyConfigured()).toBe(true);
+    expect(verifyOAuthState(state, p.issuedAt)).not.toBeNull();
   });
 
   it("is invalid under a different key", () => {

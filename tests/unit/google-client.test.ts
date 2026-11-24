@@ -33,13 +33,21 @@ describe("google client", () => {
 
   it("errors never include the refresh token, secret or request body", async () => {
     fetchMock.mockResolvedValue(json(400, { error: "invalid_grant" }));
-    for (const call of [() => api().accessToken(REFRESH), () => api().revoke(REFRESH)]) {
-      const err = await call().then(() => null, (e: Error) => e);
-      if (err) {
-        expect(err.message).not.toContain(REFRESH);
-        expect(err.message).not.toContain("client-secret-value");
-      }
-    }
+    const err1 = await api().accessToken(REFRESH).then(() => null, (e: Error) => e);
+    expect(err1).toBeInstanceOf(Error);
+    expect(err1!.message).not.toContain(REFRESH);
+    expect(err1!.message).not.toContain("client-secret-value");
+    fetchMock.mockImplementation(async () => json(500, { error: { message: REFRESH } }));
+    const err2 = await api().revoke(REFRESH).then(() => null, (e: Error) => e);
+    expect(err2).toBeInstanceOf(Error);
+    expect(err2!.message).toContain("500");
+    expect(err2!.message).not.toContain(REFRESH);
+    fetchMock.mockReset();
+    fetchMock.mockRejectedValue(new Error(`connect failed for ${REFRESH}`));
+    const err3 = await api().revoke(REFRESH).then(() => null, (e: Error) => e);
+    expect(err3!.message).toMatch(/network error/);
+    expect(err3!.message).not.toContain(REFRESH);
+    fetchMock.mockReset();
     fetchMock.mockResolvedValue(json(403, { error: { code: 403, message: `bad ${REFRESH}`, status: "PERMISSION_DENIED" } }));
     const err = await api().profile("ya29.access-token").then(() => null, (e: Error) => e);
     expect(err).toBeInstanceOf(Error);
@@ -101,7 +109,36 @@ describe("google client", () => {
   it("revoke posts to the revoke endpoint", async () => {
     fetchMock.mockResolvedValueOnce(new Response("{}", { status: 200 }));
     await api().revoke(REFRESH);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("https://oauth2.googleapis.com/revoke");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://oauth2.googleapis.com/revoke");
+    expect(String(url)).not.toContain(REFRESH);
+    expect(new URLSearchParams(init.body as string).get("token")).toBe(REFRESH);
+  });
+
+  it("revoke succeeds on invalid_token 400 but throws on other 400s", async () => {
+    fetchMock.mockResolvedValueOnce(json(400, { error: "invalid_token" }));
+    await expect(api().revoke(REFRESH)).resolves.toBeUndefined();
+    fetchMock.mockResolvedValueOnce(json(400, { error: "invalid_request" }));
+    await expect(api().revoke(REFRESH)).rejects.toThrow(/400/);
+  });
+
+  it("every request carries a timeout signal", async () => {
+    fetchMock.mockResolvedValue(json(200, { emailAddress: "a@example.com", historyId: "1" }));
+    await api().profile("tok");
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("a missing client id or secret throws a clear error and sends nothing", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "");
+    await expect(api().accessToken(REFRESH)).rejects.toThrow(/GOOGLE_CLIENT_ID \/ GOOGLE_CLIENT_SECRET/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("exchangeCode is not retried on 5xx", async () => {
+    fetchMock.mockResolvedValue(json(503, {}));
+    await expect(api().exchangeCode("c", "https://app.example.com/cb")).rejects.toThrow(/503/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleeps).toEqual([]);
   });
 
   it("sendAsSignature picks the matching address case-insensitively, or null", async () => {

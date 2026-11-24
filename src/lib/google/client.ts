@@ -35,6 +35,7 @@ export interface GoogleApi {
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
+const REQUEST_TIMEOUT_MS = 30_000;
 const BACKOFF_MS = [1000, 2000, 4000];
 const METADATA_HEADERS = ["From", "To", "Cc", "Bcc", "Date", "X-Failed-Recipients", "List-Unsubscribe", "Precedence", "Auto-Submitted", "Subject"];
 
@@ -57,16 +58,16 @@ function failure(op: string, r: Reply): Error {
 export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } = {}): GoogleApi {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-  async function send(op: string, url: string, init: RequestInit): Promise<Reply> {
+  async function send(op: string, url: string, init: RequestInit, retry = true): Promise<Reply> {
     for (let attempt = 0; ; attempt++) {
       let res: Response;
       try {
-        res = await fetch(url, init);
+        res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       } catch {
-        // The underlying error can embed the URL (query text, page tokens), so it is not passed on.
+        // Covers timeouts too. The underlying error can embed the URL (query text, page tokens), so it is not passed on.
         throw new Error(`Google ${op} failed: network error`);
       }
-      if ((res.status === 429 || res.status >= 500) && attempt < BACKOFF_MS.length) {
+      if (retry && (res.status === 429 || res.status >= 500) && attempt < BACKOFF_MS.length) {
         await sleep(BACKOFF_MS[attempt]);
         continue;
       }
@@ -81,16 +82,23 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
     }
   }
 
-  const tokenPost = (op: string, params: Record<string, string>) =>
-    send(op, TOKEN_URL, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-        client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-        ...params,
-      }).toString(),
-    });
+  const tokenPost = (op: string, params: Record<string, string>, retry = true) => {
+    const client_id = process.env.GOOGLE_CLIENT_ID;
+    const client_secret = process.env.GOOGLE_CLIENT_SECRET;
+    if (!client_id || !client_secret) {
+      throw new Error("Gmail connection is not set up (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).");
+    }
+    return send(
+      op,
+      TOKEN_URL,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id, client_secret, ...params }).toString(),
+      },
+      retry,
+    );
+  };
 
   const gmail = (op: string, accessToken: string, path: string, params: [string, string][] = []) => {
     const u = new URL(`${GMAIL}/${path}`);
@@ -100,7 +108,7 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
 
   return {
     async exchangeCode(code, redirectUri) {
-      const r = await tokenPost("code exchange", { grant_type: "authorization_code", code, redirect_uri: redirectUri });
+      const r = await tokenPost("code exchange", { grant_type: "authorization_code", code, redirect_uri: redirectUri }, false); // the code is single-use: never retried
       if (!r.ok) throw failure("code exchange", r);
       const { access_token, refresh_token, scope } = r.body;
       if (typeof access_token !== "string" || !access_token) throw new Error("Google code exchange returned no access token.");
@@ -123,12 +131,14 @@ export function createGoogleApi(opts: { sleep?: (ms: number) => Promise<void> } 
     },
 
     async revoke(refreshToken) {
-      const r = await send("revoke", `${REVOKE_URL}?${new URLSearchParams({ token: refreshToken }).toString()}`, {
+      // The token goes in the POST body, never the URL, so request instrumentation cannot record it.
+      const r = await send("revoke", REVOKE_URL, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: refreshToken }).toString(),
       });
       // An already revoked or expired token is the outcome we wanted.
-      if (!r.ok && r.status !== 400) throw failure("revoke", r);
+      if (!r.ok && !(r.status === 400 && errorCode(r.body) === "invalid_token")) throw failure("revoke", r);
     },
 
     async profile(accessToken) {

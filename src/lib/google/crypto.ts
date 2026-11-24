@@ -13,7 +13,7 @@ const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 /** The 32 byte key from RGE_TOKEN_KEY (base64), or null when unset or not exactly 32 bytes. */
 function readKey(): Buffer | null {
-  const raw = process.env.RGE_TOKEN_KEY;
+  const raw = process.env.RGE_TOKEN_KEY?.trim();
   if (!raw || !B64.test(raw)) return null;
   const key = Buffer.from(raw, "base64");
   return key.length === 32 ? key : null;
@@ -77,8 +77,10 @@ export function verifyOAuthState(state: string, now = Date.now()): { agencyId: s
   const dot = state.indexOf(".");
   if (dot <= 0 || state.indexOf(".", dot + 1) !== -1) return null;
   const payload = state.slice(0, dot);
-  const given = Buffer.from(state.slice(dot + 1), "base64url");
+  const sig = state.slice(dot + 1);
   const expected = hmac(payload);
+  if (sig !== expected.toString("base64url")) return null;
+  const given = Buffer.from(sig, "base64url");
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
   let data: Partial<StateParts>;
   try {
@@ -86,6 +88,7 @@ export function verifyOAuthState(state: string, now = Date.now()): { agencyId: s
   } catch {
     return null;
   }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const { agencyId, userId, nonce, issuedAt } = data;
   if (typeof agencyId !== "string" || typeof userId !== "string" || typeof nonce !== "string" || typeof issuedAt !== "number") return null;
   if (!Number.isFinite(issuedAt) || issuedAt > now + 60_000 || now - issuedAt > OAUTH_STATE_MAX_AGE_MS) return null;
