@@ -46,6 +46,7 @@ test("Inboxes then Team come first and the rest follow in order", async ({ page 
     "Inboxes",
     "Team",
     "Invite a teammate",
+    "Do-not-contact companies",
     "Agency",
     "Rules",
     "CRM",
@@ -143,4 +144,39 @@ test("Disconnect asks for confirmation and Cancel leaves the inbox alone", async
   await card.getByRole("button", { name: "Disconnect" }).click();
   expect(asked).toContain("Disconnect importing@example.com?");
   await expect(card).toBeVisible();
+});
+
+for (const vp of [
+  { w: 390, h: 844, name: "phone" },
+  { w: 1440, h: 900, name: "desktop" },
+]) {
+  test(`do-not-contact section fits on ${vp.name}`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.w, height: vp.h });
+    await page.goto("/dev/settings");
+    const section = page.locator("#do-not-contact");
+    await expect(section).toBeVisible();
+    await expect(section.getByText("B".repeat(100))).toBeVisible();
+    await expect(section.getByRole("button", { name: "Add company" })).toBeVisible();
+    await expect(section.getByRole("button", { name: "Upload CSV" })).toBeVisible();
+    expect(await overflowReport(page)).toEqual(FITS);
+  });
+}
+
+test("recruiters see the do-not-contact list read-only", async ({ page }) => {
+  await page.goto("/dev/settings?view=readonly");
+  const section = page.locator("#do-not-contact");
+  await expect(section.getByText("RGE never researches or emails these companies, their domains or their aliases.")).toBeVisible();
+  await expect(section.getByText("Sample Marketplace Client Number 1", { exact: true })).toBeVisible();
+  await expect(section.getByRole("button")).toHaveCount(0);
+});
+
+test("removing a company asks for confirmation", async ({ page }) => {
+  await page.goto("/dev/settings");
+  let asked = "";
+  page.on("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await page.locator("#do-not-contact").getByRole("button", { name: "Remove Sample Marketplace Client Number 1", exact: true }).click();
+  expect(asked).toContain("Remove Sample Marketplace Client Number 1 from the list?");
 });

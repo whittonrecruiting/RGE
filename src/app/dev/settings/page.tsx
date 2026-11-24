@@ -4,6 +4,8 @@ import { PageTitle } from "@/components/shell/page-title";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { InboxesSection, inboxNotice } from "@/components/settings/inboxes-section";
 import type { InboxView } from "@/lib/inboxes/queries";
+import { DncSection } from "@/components/settings/dnc-section";
+import type { DncEntry } from "@/lib/dnc/queries";
 import { TeamSection, type TeamPerson } from "@/components/settings/team-section";
 import { DEFAULT_SETTINGS, type Settings } from "@/lib/settings-defaults";
 
@@ -91,6 +93,23 @@ const inboxes: InboxView[] = [
   },
 ];
 
+const dncEntries: DncEntry[] = [
+  ...Array.from({ length: 30 }, (_, i): DncEntry => ({
+    id: `d${i}`,
+    name: `Sample Marketplace Client Number ${i + 1}`,
+    domains: [`sample-client-${i + 1}.example.com`, `mail.sample-client-${i + 1}.example.org`],
+    aliases: [`Sample Parent ${i + 1} Holdings`, `Sample Subsidiary ${i + 1}`],
+    source: i % 2 === 0 ? "manual" : "csv",
+  })),
+  {
+    id: "dlong",
+    name: "B".repeat(100),
+    domains: Array.from({ length: 14 }, (_, i) => `${"long-domain-".repeat(3)}${i + 1}.example.net`),
+    aliases: ["C".repeat(90), ...Array.from({ length: 8 }, (_, i) => `Another Long Subsidiary Name Number ${i + 1}`)],
+    source: "csv",
+  },
+];
+
 type Props = {
   searchParams: Promise<{
     view?: string;
@@ -115,6 +134,7 @@ export default async function DevSettingsPage({ searchParams }: Props) {
           timeZone={sample.timeZone}
         />
         <TeamSection people={shown} canInvite={!readonly} />
+        <DncSection entries={dncEntries} canEdit={!readonly} />
         <SettingsForm settings={sample} canEdit={!readonly} />
       </div>
     </AppShell>
