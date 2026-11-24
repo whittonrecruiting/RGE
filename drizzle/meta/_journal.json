@@ -113,6 +113,13 @@
       "when": 1795539698178,
       "tag": "0015_rls_ledger_inboxes",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795542154980,
+      "tag": "0016_inbox_one_primary",
+      "breakpoints": true
     }
   ]
 }

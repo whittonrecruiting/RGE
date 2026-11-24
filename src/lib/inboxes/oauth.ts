@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { tokenKeyConfigured } from "@/lib/google/crypto";
+import type { InboxErrorCode } from "./connect-errors";
 
 // Shared by the OAuth start and callback routes.
 
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const NONCE_COOKIE = "rge_oauth_nonce";
 export const CALLBACK_PATH = "/api/google/oauth/callback";
-export const NOT_SET_UP = "Gmail connection is not set up yet.";
 
 /** Google client id and secret plus a valid token key. Without all three nothing can be stored safely. */
 export const gmailConnectConfigured = (): boolean =>
@@ -20,8 +20,8 @@ export const nonceCookieOptions = () => ({
   maxAge: 600,
 });
 
-/** /settings#inboxes with either ?inbox=connected or ?inbox_error=<message> (percent-encoded). */
-export function settingsRedirect(origin: string, outcome: { error: string } | "connected"): NextResponse {
-  const query = outcome === "connected" ? "inbox=connected" : `inbox_error=${encodeURIComponent(outcome.error)}`;
+/** /settings#inboxes with either ?inbox=connected or ?inbox_error=<code>. Never free text: see connect-errors.ts. */
+export function settingsRedirect(origin: string, outcome: { error: InboxErrorCode } | "connected"): NextResponse {
+  const query = outcome === "connected" ? "inbox=connected" : `inbox_error=${outcome.error}`;
   return NextResponse.redirect(new URL(`/settings?${query}#inboxes`, origin));
 }

@@ -4,7 +4,9 @@ import { eq } from "drizzle-orm";
 import { inboxCredentials, inboxes } from "@/db/schema";
 import { decryptToken } from "@/lib/google/crypto";
 import { GMAIL_SCOPES, setTestGoogleApi, type GoogleApi } from "@/lib/google/client";
-import { completeConnection } from "@/lib/inboxes/connect";
+import { completeConnection, isInboxEmailConflict } from "@/lib/inboxes/connect";
+import { INBOX_ERROR_MESSAGES, inboxErrorMessage } from "@/lib/inboxes/connect-errors";
+import { withAgency } from "@/db/with-agency";
 import { disconnectInbox, setPrimaryInbox } from "@/lib/inboxes/actions";
 import { setTestTxtResolver } from "@/lib/inboxes/domain-check";
 import { listInboxes } from "@/lib/inboxes/queries";
@@ -119,7 +121,8 @@ describe("completeConnection", () => {
     const a = await connect(f.recA, { email: "pat@example.com", refresh: "1//refresh-A" });
     if (!a.ok) throw new Error("connect failed");
     const b = await connect(f.recB, { email: "pat@example.com", refresh: "1//refresh-B" });
-    expect(b).toEqual({ ok: false, error: "This inbox is already connected by a teammate." });
+    expect(b).toEqual({ ok: false, error: "teammate" });
+    expect(inboxErrorMessage("teammate")).toBe("This inbox is already connected by a teammate.");
     const rows = await allInboxes();
     expect(rows).toHaveLength(1);
     expect(rows[0]!.userId).toBe(f.recA.userId);
@@ -161,7 +164,8 @@ describe("completeConnection", () => {
     });
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.error).toMatch(/allow all permissions/i);
+    expect(r.error).toBe("scopes");
+    expect(inboxErrorMessage(r.error)).toMatch(/allow all permissions/i);
     expect(r.error).not.toContain("refresh-partial");
     expect(await allInboxes()).toHaveLength(0);
     expect(await allCreds()).toHaveLength(0);
@@ -178,8 +182,57 @@ describe("completeConnection", () => {
     const r = await completeConnection(f.recA, "4/secret-code", REDIRECT, NOW);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.error).not.toContain("secret-code");
+    expect(r.error).toBe("failed");
     expect(await allInboxes()).toHaveLength(0);
+  });
+
+  test("a teammate's disconnected inbox is refused with its own code and not reassigned", async () => {
+    const a = await connect(f.recA, { email: "pat@example.com" });
+    if (!a.ok) throw new Error("connect failed");
+    await asMember(f.recA, () => disconnectInbox(a.inboxId));
+    revoked = [];
+    const b = await connect(f.recB, { email: "pat@example.com", refresh: "1//refresh-B" });
+    expect(b).toEqual({ ok: false, error: "teammate_before" });
+    expect(inboxErrorMessage("teammate_before")).toBe("This inbox was connected by a teammate before. Ask an Owner or Admin.");
+    const row = await inbox(a.inboxId);
+    expect(row.userId).toBe(f.recA.userId);
+    expect(row.status).toBe("disconnected");
+    expect(await allCreds()).toHaveLength(0);
+    expect(revoked).toEqual([]);
+  });
+
+  test("a concurrent insert of the same mailbox is recognized as the teammate case", async () => {
+    const a = await connect(f.recA, { email: "pat@example.com" });
+    if (!a.ok) throw new Error("connect failed");
+    const err = await withAgency(f.agency.id, (tx) =>
+      tx.insert(inboxes).values({ agencyId: f.agency.id, userId: f.recB.userId, email: "pat@example.com", backfillFrom: NOW }),
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).not.toBeNull();
+    expect(isInboxEmailConflict(err)).toBe(true);
+    expect(isInboxEmailConflict(new Error("something else"))).toBe(false);
+    expect(isInboxEmailConflict(Object.assign(new Error("dup"), { code: "23505", constraint: "other_unique" }))).toBe(false);
+  });
+
+  test("the database allows only one primary inbox per member", async () => {
+    const a = await connect(f.recA, { email: "pat@example.com" });
+    const b = await connect(f.recA, { email: "pat.second@example.com" });
+    if (!a.ok || !b.ok) throw new Error("connect failed");
+    await expect(
+      withAgency(f.agency.id, (tx) => tx.update(inboxes).set({ isPrimary: true }).where(eq(inboxes.id, b.inboxId))),
+    ).rejects.toThrow();
+  });
+});
+
+describe("inboxErrorMessage", () => {
+  test("maps known codes, falls back for unknown ones and passes null through", () => {
+    expect(inboxErrorMessage("not_set_up")).toBe("Gmail connection is not set up yet.");
+    expect(inboxErrorMessage("scopes")).toBe(INBOX_ERROR_MESSAGES.scopes);
+    expect(inboxErrorMessage("<script>alert(1)</script>")).toBe("Gmail could not be connected. Try again.");
+    expect(inboxErrorMessage("toString")).toBe("Gmail could not be connected. Try again.");
+    expect(inboxErrorMessage(null)).toBeNull();
   });
 });
 

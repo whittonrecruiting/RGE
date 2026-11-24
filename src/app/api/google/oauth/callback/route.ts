@@ -3,12 +3,10 @@ import type { NextRequest } from "next/server";
 import { requireMember } from "@/lib/auth";
 import { verifyOAuthState } from "@/lib/google/crypto";
 import { completeConnection } from "@/lib/inboxes/connect";
-import { CALLBACK_PATH, NONCE_COOKIE, NOT_SET_UP, gmailConnectConfigured, nonceCookieOptions, settingsRedirect } from "@/lib/inboxes/oauth";
+import type { InboxErrorCode } from "@/lib/inboxes/connect-errors";
+import { CALLBACK_PATH, NONCE_COOKIE, gmailConnectConfigured, nonceCookieOptions, settingsRedirect } from "@/lib/inboxes/oauth";
 
 export const dynamic = "force-dynamic";
-
-const MISMATCH = "The connection request expired or did not match. Try again.";
-const DECLINED = "Google did not connect the inbox. Try again.";
 
 const sameNonce = (a: string, b: string) => {
   const x = Buffer.from(a);
@@ -23,10 +21,10 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const cookieNonce = request.cookies.get(NONCE_COOKIE)?.value;
 
-  const outcome = await (async (): Promise<{ error: string } | "connected"> => {
-    if (!gmailConnectConfigured()) return { error: NOT_SET_UP };
+  const outcome = await (async (): Promise<{ error: InboxErrorCode } | "connected"> => {
+    if (!gmailConnectConfigured()) return { error: "not_set_up" };
     // Google sends ?error=access_denied (or similar) when the user cancels. Its text is not echoed.
-    if (params.has("error")) return { error: DECLINED };
+    if (params.has("error")) return { error: "declined" };
 
     const state = verifyOAuthState(params.get("state") ?? "");
     if (
@@ -36,16 +34,16 @@ export async function GET(request: NextRequest) {
       state.agencyId !== member.agencyId ||
       state.userId !== member.userId
     ) {
-      return { error: MISMATCH };
+      return { error: "mismatch" };
     }
     const code = params.get("code");
-    if (!code) return { error: DECLINED };
+    if (!code) return { error: "declined" };
 
     try {
       const result = await completeConnection(member, code, `${origin}${CALLBACK_PATH}`);
       return result.ok ? "connected" : { error: result.error };
     } catch {
-      return { error: "The inbox could not be connected. Try again." };
+      return { error: "failed" };
     }
   })();
 

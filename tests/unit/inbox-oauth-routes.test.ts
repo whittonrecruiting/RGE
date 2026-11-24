@@ -63,7 +63,7 @@ const stateFor = (m: Member, nonce: string) =>
 const callbackAs = (m: Member, query: string, nonce?: string) =>
   asMember(m, () => callback(req(`/api/google/oauth/callback?${query}`, nonce)));
 const location = (res: Response) => res.headers.get("location");
-const MISMATCH = `${ORIGIN}/settings?inbox_error=${encodeURIComponent("The connection request expired or did not match. Try again.")}#inboxes`;
+const MISMATCH = `${ORIGIN}/settings?inbox_error=mismatch#inboxes`;
 
 describe("oauth start", () => {
   test("redirects to Google with offline consent, the scopes and a signed state, and sets the nonce cookie", async () => {
@@ -87,9 +87,9 @@ describe("oauth start", () => {
   test("missing config redirects to settings with the not set up message", async () => {
     delete process.env.RGE_TOKEN_KEY;
     const res = await asMember(f.recA, () => start(req("/api/google/oauth/start")));
-    expect(location(res)).toBe(`${ORIGIN}/settings?inbox_error=Gmail%20connection%20is%20not%20set%20up%20yet.#inboxes`);
+    expect(location(res)).toBe(`${ORIGIN}/settings?inbox_error=not_set_up#inboxes`);
     const cb = await callbackAs(f.recA, "code=c&state=s", "n");
-    expect(location(cb)).toBe(`${ORIGIN}/settings?inbox_error=Gmail%20connection%20is%20not%20set%20up%20yet.#inboxes`);
+    expect(location(cb)).toBe(`${ORIGIN}/settings?inbox_error=not_set_up#inboxes`);
   });
 });
 
@@ -121,6 +121,6 @@ describe("oauth callback", () => {
 
   test("Google's error parameter is not echoed", async () => {
     const res = await callbackAs(f.recA, "error=access_denied", "n");
-    expect(location(res)).toBe(`${ORIGIN}/settings?inbox_error=${encodeURIComponent("Google did not connect the inbox. Try again.")}#inboxes`);
+    expect(location(res)).toBe(`${ORIGIN}/settings?inbox_error=declined#inboxes`);
   });
 });

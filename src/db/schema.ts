@@ -13,6 +13,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
@@ -397,6 +398,8 @@ export const inboxes = pgTable(
     sameAgencyMember(t, t.userId, "inboxes_user_member_fk"),
     unique("inboxes_agency_email_unique").on(t.agencyId, t.email),
     unique("inboxes_agency_id_unique").on(t.agencyId, t.id),
+    // At most one primary inbox per member. Code clears the old primary before setting a new one.
+    uniqueIndex("inboxes_one_primary_per_user").on(t.agencyId, t.userId).where(sql`${t.isPrimary}`),
   ],
 );
 

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "inboxes_one_primary_per_user" ON "inboxes" USING btree ("agency_id","user_id") WHERE "inboxes"."is_primary";

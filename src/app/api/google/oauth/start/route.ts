@@ -8,7 +8,6 @@ import {
   CALLBACK_PATH,
   GOOGLE_AUTH_URL,
   NONCE_COOKIE,
-  NOT_SET_UP,
   gmailConnectConfigured,
   nonceCookieOptions,
   settingsRedirect,
@@ -21,8 +20,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const member = await requireMember();
   const origin = request.nextUrl.origin;
-  if (!gmailConnectConfigured()) return settingsRedirect(origin, { error: NOT_SET_UP });
-  if (!can(member, "inbox.connect")) return settingsRedirect(origin, { error: "You do not have permission to connect an inbox." });
+  if (!gmailConnectConfigured()) return settingsRedirect(origin, { error: "not_set_up" });
+  if (!can(member, "inbox.connect")) return settingsRedirect(origin, { error: "no_permission" });
 
   const nonce = randomBytes(32).toString("base64url");
   const state = signOAuthState({ agencyId: member.agencyId, userId: member.userId, nonce, issuedAt: Date.now() });
